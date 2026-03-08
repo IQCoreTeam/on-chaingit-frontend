@@ -389,7 +389,7 @@ export default function RepoDetail() {
       
       try {
           setProcessing(true);
-          await gitService.forkRepo(repoName, forkName);
+          await gitService.forkRepo(repoName, repo!.owner, forkName);
           toast.success(`Fork created: ${forkName}`);
           router.push(`/repos/${forkName}`);
       } catch (e: any) {
@@ -415,7 +415,7 @@ export default function RepoDetail() {
       if (!newIssueTitle) return;
       try {
           setProcessing(true);
-          await gitService.createIssue(repoName, newIssueTitle, newIssueBody, newIssueBounty ? parseFloat(newIssueBounty) : undefined, newIssueLabels);
+          await gitService.createIssue(repoName, newIssueTitle, newIssueBody, undefined, newIssueBounty ? parseFloat(newIssueBounty) : undefined, newIssueLabels);
           setNewIssueTitle("");
           setNewIssueBody("");
           setNewIssueBounty("");

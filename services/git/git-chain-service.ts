@@ -2,7 +2,7 @@ import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstructi
 import { Idl } from "@coral-xyz/anchor";
 import iqlabs from "iqlabs-sdk";
 import codeInIdl from "iqlabs-sdk/idl/code_in.json";
-import { Repository, Commit, FileTree, Collaborator, GIT_CONSTANTS, Ref, PullRequest, UserProfile, Comment, FundingPool, Issue } from "./types";
+import { Repository, Commit, FileTree, Collaborator, GIT_CONSTANTS, OWNER_SCOPED_TABLES, Ref, PullRequest, UserProfile, Comment, FundingPool, Issue } from "./types";
 
 export interface Star {
     repoName: string;
@@ -75,6 +75,16 @@ export class GitChainService {
         return Buffer.from(hash);
     }
 
+    /** Compute table seed — owner-scoped tables append the wallet address */
+    private async tableSeed(tableName: string, ownerAddress?: string): Promise<Buffer> {
+        if (OWNER_SCOPED_TABLES.has(tableName)) {
+            const owner = ownerAddress || this.wallet.publicKey?.toBase58();
+            if (!owner) throw new Error("Wallet not connected and no ownerAddress provided for owner-scoped table");
+            return this.sha256(tableName + "_" + owner);
+        }
+        return this.sha256(tableName);
+    }
+
     private get signer() {
          if (!this.wallet.publicKey) throw new Error("Wallet not connected");
          return {
@@ -118,13 +128,15 @@ export class GitChainService {
             await this.sendInstruction(ix);
         }
 
+        const myAddr = this.wallet.publicKey!.toBase58();
+
         await this.ensureTable(GIT_CONSTANTS.REPOS_TABLE, [
             "name",
             "description",
             "owner",
             "timestamp",
             "isPublic",
-        ]);
+        ], myAddr);
 
         await this.ensureTable(GIT_CONSTANTS.COMMITS_TABLE, [
             "id",
@@ -134,25 +146,25 @@ export class GitChainService {
             "timestamp",
             "treeTxId",
             "parentCommitId",
-        ]);
+        ], myAddr);
 
         await this.ensureTable(GIT_CONSTANTS.REFS_TABLE, [
             "repoName",
             "refName",
             "commitId",
-        ]);
+        ], myAddr);
 
         await this.ensureTable(GIT_CONSTANTS.COLLABORATORS_TABLE, [
             "repoName",
             "userAddress",
             "role",
-        ]);
-        
+        ], myAddr);
+
         await this.ensureTable(EXTENDED_CONSTANTS.FORKS_TABLE, [
             "originalRepoName",
             "forkRepoName",
             "owner",
-        ]);
+        ], myAddr);
 
         await this.ensureTable(EXTENDED_CONSTANTS.ISSUES_TABLE, [
             "id",
@@ -162,12 +174,12 @@ export class GitChainService {
             "author",
             "status",
             "timestamp"
-        ]);
+        ], myAddr);
 
         await this.ensureTable(EXTENDED_CONSTANTS.STARS_TABLE, [
             "repoName",
             "userAddress"
-        ]);
+        ], myAddr);
 
         await this.ensureTable(GIT_CONSTANTS.PULL_REQUESTS_TABLE, [
             "id",
@@ -179,7 +191,7 @@ export class GitChainService {
             "targetBranch",
             "status",
             "timestamp"
-        ]);
+        ], myAddr);
 
         await this.ensureTable(GIT_CONSTANTS.PROFILES_TABLE, [
             "userAddress",
@@ -197,7 +209,7 @@ export class GitChainService {
             "author",
             "body",
             "timestamp"
-        ]);
+        ], myAddr);
 
         await this.ensureTable(EXTENDED_CONSTANTS.QF_POOL_TABLE, [
             "id",
@@ -213,12 +225,12 @@ export class GitChainService {
             "emoji",
             "userAddress",
             "timestamp"
-        ]);
+        ], myAddr);
     }
 
-    private async ensureTable(tableName: string, columns: string[]) {
+    private async ensureTable(tableName: string, columns: string[], ownerAddress?: string) {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(tableName);
+        const tableSeed = await this.tableSeed(tableName, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
         const tablePda = iqlabs.contract.getTablePda(
             dbRoot,
@@ -274,33 +286,33 @@ export class GitChainService {
         };
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.REPOS_TABLE);
-        
+        const seed = await this.tableSeed(GIT_CONSTANTS.REPOS_TABLE);
+
         console.log(`Creating ${isPublic ? "public" : "private"} repo '${name}'...`);
-        
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify(row)
         );
         console.log("Repo created!");
     }
 
-    async forkRepo(originalRepoName: string, newName?: string) {
+    async forkRepo(originalRepoName: string, originalOwnerAddress: string, newName?: string) {
         if (!this.wallet.publicKey) throw new Error("Wallet not connected");
         await this.ensureInfrastructure();
 
         const myAddr = this.wallet.publicKey.toBase58();
         const targetName = newName || `${originalRepoName}-fork`;
 
-        // 1. Get Original Repo Info
-        const repos = await this.listRepos();
+        // 1. Get Original Repo Info (from original owner's table)
+        const repos = await this.listRepos(originalOwnerAddress);
         const original = repos.find(r => r.name === originalRepoName);
         if (!original) throw new Error("Original repo not found");
 
-        // 2. Create the New Repo (The Fork)
+        // 2. Create the New Repo (The Fork) — in MY table
         const forkRow: Repository = {
             name: targetName,
             description: `Fork of ${originalRepoName}: ${original.description}`,
@@ -310,26 +322,25 @@ export class GitChainService {
         };
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.REPOS_TABLE);
-        
+        const repoSeed = await this.tableSeed(GIT_CONSTANTS.REPOS_TABLE);
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            repoSeed,
             JSON.stringify(forkRow)
         );
 
-        // 3. Clone the HEAD state
-        const branches = await this.listBranches(originalRepoName);
+        // 3. Clone the HEAD state (read from original owner's tables)
+        const branches = await this.listBranches(originalRepoName, originalOwnerAddress);
         const mainBranch = branches.find(b => b.refName === "main");
-        
+
         if (mainBranch && mainBranch.commitId) {
-             const oldLog = await this.getLog(originalRepoName);
+             const oldLog = await this.getLog(originalRepoName, originalOwnerAddress);
              const headCommit = oldLog.find(c => c.id === mainBranch.commitId);
-             
+
              if (headCommit) {
-                 // Create commit manually to skip file processing and reuse tree
                  const forkCommit: Commit = {
                      id: crypto.randomUUID(),
                      repoName: targetName,
@@ -339,31 +350,31 @@ export class GitChainService {
                      treeTxId: headCommit.treeTxId,
                      parentCommitId: undefined
                  };
-                 
-                 const commitTableSeed = await this.sha256(GIT_CONSTANTS.COMMITS_TABLE);
+
+                 const commitSeed = await this.tableSeed(GIT_CONSTANTS.COMMITS_TABLE);
                  await iqlabs.writer.writeRow(
                      this.connection,
                      this.signer as any,
                      dbRootId,
-                     commitTableSeed,
+                     commitSeed,
                      JSON.stringify(forkCommit)
                  );
                  console.log("Fork initialized with upstream state.");
              }
         }
-        
-        // 4. Record Fork Metadata
+
+        // 4. Record Fork Metadata (in MY forks table)
         const forkMeta = {
             originalRepoName,
             forkRepoName: targetName,
             owner: myAddr
         };
-        const forkTableSeed = await this.sha256(EXTENDED_CONSTANTS.FORKS_TABLE);
+        const forkSeed = await this.tableSeed(EXTENDED_CONSTANTS.FORKS_TABLE);
         await iqlabs.writer.writeRow(
              this.connection,
              this.signer as any,
              dbRootId,
-             forkTableSeed,
+             forkSeed,
              JSON.stringify(forkMeta)
         );
 
@@ -371,13 +382,13 @@ export class GitChainService {
         return targetName;
     }
 
-    async listRepos(): Promise<Repository[]> {
+    async listRepos(ownerAddress?: string): Promise<Repository[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.REPOS_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.REPOS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
         const table = iqlabs.contract.getTablePda(
             dbRoot,
-            tableSeed,
+            seed,
             this.programId
         );
 
@@ -438,13 +449,13 @@ export class GitChainService {
         }
     }
 
-    async getLog(repoName: string): Promise<Commit[]> {
+    async getLog(repoName: string, ownerAddress?: string): Promise<Commit[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.COMMITS_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.COMMITS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
         const table = iqlabs.contract.getTablePda(
             dbRoot,
-            tableSeed,
+            seed,
             this.programId
         );
 
@@ -560,28 +571,28 @@ export class GitChainService {
          }
     }
 
-    async listBranches(repoName: string): Promise<Ref[]> {
+    async listBranches(repoName: string, ownerAddress?: string): Promise<Ref[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.REFS_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.REFS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
         const table = iqlabs.contract.getTablePda(
             dbRoot,
-            tableSeed,
+            seed,
             this.programId
         );
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
             const allRefs = rows as unknown as Ref[];
-            
+
             // Deduplicate: Keep latest (last) occurrence of each refName
             const refMap = new Map<string, Ref>();
             allRefs.forEach(r => {
                 if (r.repoName === repoName) {
-                    refMap.set(r.refName, r); // Overwrites previous, effectively keeping the latest
+                    refMap.set(r.refName, r);
                 }
             });
-            
+
             return Array.from(refMap.values());
         } catch {
             return [];
@@ -593,20 +604,19 @@ export class GitChainService {
         console.log(`Creating branch '${branchName}' at ${commitId.slice(0, 8)}...`);
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.REFS_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.REFS_TABLE);
 
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify({ repoName, refName: branchName, commitId })
         );
         console.log(`Branch '${branchName}' created.`);
     }
 
     async addCollaborator(repoName: string, userAddress: string) {
-        // Basic owner check should be done in UI or here if wallet avail
         if (this.wallet.publicKey) {
              const repos = await this.listRepos();
              const repo = repos.find(r => r.name === repoName);
@@ -617,27 +627,27 @@ export class GitChainService {
 
         await this.ensureInfrastructure();
         console.log(`Adding ${userAddress} to '${repoName}'...`);
-        
+
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.COLLABORATORS_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.COLLABORATORS_TABLE);
 
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify({ repoName, userAddress, role: "writer" })
         );
         console.log("Collaborator added.");
     }
 
-    async getCollaborators(repoName: string): Promise<Collaborator[]> {
+    async getCollaborators(repoName: string, ownerAddress?: string): Promise<Collaborator[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.COLLABORATORS_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.COLLABORATORS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
         const table = iqlabs.contract.getTablePda(
             dbRoot,
-            tableSeed,
+            seed,
             this.programId
         );
 
@@ -781,13 +791,13 @@ export class GitChainService {
          };
          
          const dbRootId = await this.getDbRootId();
-         const tableSeed = await this.sha256(GIT_CONSTANTS.COMMITS_TABLE);
- 
+         const commitSeed = await this.tableSeed(GIT_CONSTANTS.COMMITS_TABLE);
+
          await iqlabs.writer.writeRow(
              this.connection,
              this.signer as any,
              dbRootId,
-             tableSeed,
+             commitSeed,
              JSON.stringify(commit)
          );
          console.log(`Commit successful! ID: ${commit.id}`);
@@ -795,7 +805,7 @@ export class GitChainService {
 
 
 
-    async createIssue(repoName: string, title: string, body: string, bountyAmount?: number, labels?: string[]) {
+    async createIssue(repoName: string, title: string, body: string, ownerAddress?: string, bountyAmount?: number, labels?: string[]) {
         await this.ensureInfrastructure();
 
         const issue: Issue = {
@@ -812,23 +822,23 @@ export class GitChainService {
         };
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.ISSUES_TABLE);
-        
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.ISSUES_TABLE, ownerAddress);
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify(issue)
         );
         console.log("Issue created!");
     }
 
-    async getIssues(repoName: string): Promise<Issue[]> {
+    async getIssues(repoName: string, ownerAddress?: string): Promise<Issue[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.ISSUES_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.ISSUES_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
@@ -840,7 +850,7 @@ export class GitChainService {
         }
     }
 
-    async createComment(repoName: string, targetId: string, body: string) {
+    async createComment(repoName: string, targetId: string, body: string, ownerAddress?: string) {
         if (!this.wallet.publicKey) throw new Error("Wallet not connected");
         await this.ensureInfrastructure();
 
@@ -854,45 +864,45 @@ export class GitChainService {
         };
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.COMMENTS_TABLE);
-        
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.COMMENTS_TABLE, ownerAddress);
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify(comment)
         );
         console.log("Comment posted!");
     }
 
-    async getComments(repoName: string, targetId: string): Promise<Comment[]> {
+    async getComments(repoName: string, targetId: string, ownerAddress?: string): Promise<Comment[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.COMMENTS_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.COMMENTS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
             return (rows as unknown as Comment[])
                 .filter(c => c.repoName === repoName && c.targetId === targetId)
-                .sort((a,b) => a.timestamp - b.timestamp); // Oldest first
+                .sort((a,b) => a.timestamp - b.timestamp);
         } catch(e) {
             console.error("Failed to fetch comments", e);
             return [];
         }
     }
 
-    async toggleStar(repoName: string) {
+    async toggleStar(repoName: string, ownerAddress?: string) {
         if (!this.wallet.publicKey) throw new Error("Wallet not connected");
         await this.ensureInfrastructure();
 
         const myAddr = this.wallet.publicKey.toBase58();
-        const stars = await this.getStars(repoName);
+        const stars = await this.getStars(repoName, ownerAddress);
         const alreadyStarred = stars.some(s => s.userAddress === myAddr);
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.STARS_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.STARS_TABLE, ownerAddress);
 
         if (alreadyStarred) {
              console.log("Already starred!");
@@ -901,18 +911,18 @@ export class GitChainService {
                 this.connection,
                 this.signer as any,
                 dbRootId,
-                tableSeed,
+                seed,
                 JSON.stringify({ repoName, userAddress: myAddr })
             );
             console.log("Starred!");
         }
     }
 
-    async getStars(repoName: string): Promise<Star[]> {
+    async getStars(repoName: string, ownerAddress?: string): Promise<Star[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.STARS_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.STARS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
@@ -922,11 +932,11 @@ export class GitChainService {
         }
     }
 
-    async fetchAllStars(): Promise<Star[]> {
+    async fetchAllStars(ownerAddress?: string): Promise<Star[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.STARS_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.STARS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
@@ -937,19 +947,18 @@ export class GitChainService {
     }
 
     // ===== REACTIONS =====
-    async toggleReaction(targetId: string, targetType: "issue" | "comment" | "pr", emoji: string) {
+    async toggleReaction(targetId: string, targetType: "issue" | "comment" | "pr", emoji: string, ownerAddress?: string) {
         if (!this.wallet.publicKey) throw new Error("Wallet not connected");
         await this.ensureInfrastructure();
 
         const myAddr = this.wallet.publicKey.toBase58();
-        const reactions = await this.getReactions(targetId);
+        const reactions = await this.getReactions(targetId, ownerAddress);
         const existing = reactions.find(r => r.userAddress === myAddr && r.emoji === emoji);
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.REACTIONS_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.REACTIONS_TABLE, ownerAddress);
 
         if (existing) {
-            // Already reacted with this emoji - in a real system we'd delete. For simplicity, we skip.
             console.log("Already reacted with", emoji);
             return;
         }
@@ -967,17 +976,17 @@ export class GitChainService {
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify(reaction)
         );
         console.log("Reaction added:", emoji);
     }
 
-    async getReactions(targetId: string): Promise<{ id: string; targetId: string; targetType: string; emoji: string; userAddress: string; timestamp: number }[]> {
+    async getReactions(targetId: string, ownerAddress?: string): Promise<{ id: string; targetId: string; targetType: string; emoji: string; userAddress: string; timestamp: number }[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.REACTIONS_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.REACTIONS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
@@ -987,11 +996,11 @@ export class GitChainService {
         }
     }
 
-    async getStarredRepos(userAddress: string): Promise<string[]> {
+    async getStarredRepos(userAddress: string, ownerAddress?: string): Promise<string[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.STARS_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.STARS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
@@ -1003,11 +1012,11 @@ export class GitChainService {
         }
     }
 
-    async getAllCommits(author?: string): Promise<Commit[]> {
+    async getAllCommits(ownerAddress?: string, author?: string): Promise<Commit[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.COMMITS_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.COMMITS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
@@ -1021,7 +1030,7 @@ export class GitChainService {
         }
     }
 
-    async createPullRequest(repoName: string, title: string, description: string, sourceBranch: string, targetBranch: string) {
+    async createPullRequest(repoName: string, title: string, description: string, sourceBranch: string, targetBranch: string, ownerAddress?: string) {
         await this.ensureInfrastructure();
 
         const pr: PullRequest = {
@@ -1037,33 +1046,31 @@ export class GitChainService {
         };
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.PULL_REQUESTS_TABLE);
-        
+        const seed = await this.tableSeed(GIT_CONSTANTS.PULL_REQUESTS_TABLE, ownerAddress);
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify(pr)
         );
         console.log("Pull Request created!");
     }
 
-    async listPullRequests(repoName: string): Promise<PullRequest[]> {
+    async listPullRequests(repoName: string, ownerAddress?: string): Promise<PullRequest[]> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.PULL_REQUESTS_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.PULL_REQUESTS_TABLE, ownerAddress);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
             const allPrs = rows as unknown as PullRequest[];
-            
-            // Deduplicate by ID, keeping the one with latest timestamp
+
             const latestMap = new Map<string, PullRequest>();
             allPrs.forEach(pr => {
                 const existing = latestMap.get(pr.id);
-                // Only consider PRs for this repo
                 if (pr.repoName === repoName) {
                     if (!existing || pr.timestamp > existing.timestamp) {
                         latestMap.set(pr.id, pr);
@@ -1078,10 +1085,9 @@ export class GitChainService {
         }
     }
 
-    async mergePullRequest(pr: PullRequest) {
+    async mergePullRequest(pr: PullRequest, ownerAddress?: string) {
         if (!this.wallet.publicKey) throw new Error("Wallet not connected");
-        
-        // 1. Update PR status
+
         const updatedPr: PullRequest = {
             ...pr,
             status: 'merged',
@@ -1089,40 +1095,35 @@ export class GitChainService {
         };
 
         const dbRootId = await this.getDbRootId();
-        const prTableSeed = await this.sha256(GIT_CONSTANTS.PULL_REQUESTS_TABLE);
-        
+        const prSeed = await this.tableSeed(GIT_CONSTANTS.PULL_REQUESTS_TABLE, ownerAddress);
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            prTableSeed,
+            prSeed,
             JSON.stringify(updatedPr)
         );
 
-        // 2. Update Target Branch Reference (Fast-Forward)
-        // Find commit of source branch
-        const branches = await this.listBranches(pr.repoName);
+        const branches = await this.listBranches(pr.repoName, ownerAddress);
         const sourceRef = branches.find(b => b.refName === pr.sourceBranch);
-        
+
         if (sourceRef && sourceRef.commitId) {
             await this.createBranch(pr.repoName, pr.targetBranch, sourceRef.commitId);
             console.log(`Merged ${pr.sourceBranch} into ${pr.targetBranch}`);
-            
-            // 3. Check for Bounty (Simple Logic: Look for "Fixes #ISSUE_ID" in PR description)
+
             const issueMatch = pr.description.match(/Fixes #([a-f0-9-]+)/);
             if (issueMatch) {
                const issueId = issueMatch[1];
-               const issues = await this.getIssues(pr.repoName);
-               const relatedIssue = issues.find(i => i.id.startsWith(issueId)); // Allow partial ID match if UUID is long
-               
+               const issues = await this.getIssues(pr.repoName, ownerAddress);
+               const relatedIssue = issues.find(i => i.id.startsWith(issueId));
+
                if (relatedIssue && relatedIssue.bounty && relatedIssue.bountyStatus === 'active') {
                    console.log(`Found bounty of ${relatedIssue.bounty} SOL on issue ${relatedIssue.id}`);
-                   // Attempt transfer
                    try {
                        await this.sendTip(pr.author, relatedIssue.bounty);
-                       
-                       // Mark issue as paid/closed
-                       const issueTableSeed = await this.sha256(EXTENDED_CONSTANTS.ISSUES_TABLE);
+
+                       const issueSeed = await this.tableSeed(EXTENDED_CONSTANTS.ISSUES_TABLE, ownerAddress);
                        const updatedIssue: Issue = {
                            ...relatedIssue,
                            status: 'closed',
@@ -1132,13 +1133,12 @@ export class GitChainService {
                             this.connection,
                             this.signer as any,
                             dbRootId,
-                            issueTableSeed,
+                            issueSeed,
                             JSON.stringify(updatedIssue)
                        );
                        console.log("Bounty paid and issue closed.");
                    } catch (e) {
                        console.error("Failed to pay bounty:", e);
-                       // Don't fail the whole merge just because payment didn't go through (e.g. insufficient funds)
                    }
                }
             }
@@ -1160,23 +1160,13 @@ export class GitChainService {
         };
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.PROFILES_TABLE);
-        
-        // Profiles are keyed by userAddress (which is unique)
-        // Since writeRow appends, we should strictly just write latest.
-        // Reading logic will take the latest entry for a userAddress.
-        
-        // Note: For 'socials' object we need to stringify it twice? 
-        // No, `writeRow` takes a JSON string of the whole row. 
-        // The column definition for 'socials' expects a string if it's not a primitive.
-        // Actually, our current schema is loose. We'll store the whole object in the row JSON.
-        // When reading back, we just parse the row.
-        
+        const seed = await this.tableSeed(GIT_CONSTANTS.PROFILES_TABLE);
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify(profile)
         );
         console.log("Profile updated!");
@@ -1184,9 +1174,9 @@ export class GitChainService {
 
     async getProfile(userAddress: string): Promise<UserProfile | null> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(GIT_CONSTANTS.PROFILES_TABLE);
+        const seed = await this.tableSeed(GIT_CONSTANTS.PROFILES_TABLE);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
@@ -1204,9 +1194,9 @@ export class GitChainService {
     // Quadratic Funding
     async getFundingPool(): Promise<FundingPool> {
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.QF_POOL_TABLE);
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.QF_POOL_TABLE);
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
-        const table = iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
+        const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
             const rows = await iqlabs.reader.readTableRows(table);
@@ -1251,13 +1241,13 @@ export class GitChainService {
         };
 
         const dbRootId = await this.getDbRootId();
-        const tableSeed = await this.sha256(EXTENDED_CONSTANTS.QF_POOL_TABLE);
-        
+        const seed = await this.tableSeed(EXTENDED_CONSTANTS.QF_POOL_TABLE);
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
             dbRootId,
-            tableSeed,
+            seed,
             JSON.stringify(updated)
         );
         console.log("Pool state updated!");

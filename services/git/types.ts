@@ -63,6 +63,20 @@ export const GIT_CONSTANTS = {
   PULL_REQUESTS_TABLE: "git_prs",
   PROFILES_TABLE: "git_profiles",
 };
+
+/** Tables scoped per-owner (wallet address appended to table name for PDA derivation) */
+export const OWNER_SCOPED_TABLES = new Set([
+  GIT_CONSTANTS.REPOS_TABLE,
+  GIT_CONSTANTS.COMMITS_TABLE,
+  GIT_CONSTANTS.REFS_TABLE,
+  GIT_CONSTANTS.COLLABORATORS_TABLE,
+  GIT_CONSTANTS.FORKS_TABLE,
+  GIT_CONSTANTS.PULL_REQUESTS_TABLE,
+  "git_issues",
+  "git_stars",
+  "git_comments",
+  "git_reactions",
+]);
  
 export interface Comment {
     id: string;

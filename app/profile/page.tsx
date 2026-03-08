@@ -69,7 +69,7 @@ export default function ProfilePage() {
             setMyRepos(allRepos.filter(r => r.owner === myAddr).sort((a,b) => b.timestamp - a.timestamp));
 
             // 2. Fetch Real Contribution Data
-            const allCommits = await gitService.getAllCommits(myAddr);
+            const allCommits = await gitService.getAllCommits(myAddr, myAddr);
             setTotalCommits(allCommits.length);
 
             // Process commit dates for graph
