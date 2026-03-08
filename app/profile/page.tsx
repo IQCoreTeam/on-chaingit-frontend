@@ -363,7 +363,7 @@ export default function ProfilePage() {
                                                     <GitBranch size={16} className="text-neon-cyan" />
                                                 </div>
                                                 <div className="flex justify-between items-start mb-2">
-                                                    <Link href={`/repos/${repo.name}`} className="text-neon-cyan font-bold text-base hover:shadow-[0_0_10px_rgba(0,243,255,0.4)] transition-all flex items-center gap-2">
+                                                    <Link href={`/${repo.owner}/${repo.name}`} className="text-neon-cyan font-bold text-base hover:shadow-[0_0_10px_rgba(0,243,255,0.4)] transition-all flex items-center gap-2">
                                                         {repo.name}
                                                     </Link>
                                                     <span className="px-2 py-0.5 border border-white/20 text-[10px] text-white/50 font-tech uppercase">{repo.isPublic ? 'PUB' : 'PVT'}</span>
@@ -435,7 +435,7 @@ export default function ProfilePage() {
                                      <div key={repo.name} className="py-6 border-b border-white/5 last:border-0 flex justify-between items-start group">
                                          <div>
                                              <div className="flex items-center gap-3 mb-2">
-                                                 <Link href={`/repos/${repo.name}`} className="text-xl font-bold text-white group-hover:text-neon-cyan transition-colors font-cyber tracking-wide">
+                                                 <Link href={`/${repo.owner}/${repo.name}`} className="text-xl font-bold text-white group-hover:text-neon-cyan transition-colors font-cyber tracking-wide">
                                                      {repo.name}
                                                  </Link>
                                                  <span className="px-2 py-0.5 border border-neon-pink/50 text-neon-pink text-[10px] font-tech uppercase bg-neon-pink/5">{repo.isPublic ? 'Public' : 'Private'}</span>
@@ -475,7 +475,7 @@ export default function ProfilePage() {
                                          <div key={repo.name} className="py-6 border-b border-white/5 last:border-0 flex justify-between items-start group">
                                              <div>
                                                  <div className="flex items-center gap-2 mb-1">
-                                                     <Link href={`/repos/${repo.name}`} className="text-lg font-bold text-white group-hover:text-neon-cyan transition-colors font-mono">
+                                                     <Link href={`/${repo.owner}/${repo.name}`} className="text-lg font-bold text-white group-hover:text-neon-cyan transition-colors font-mono">
                                                          <span className="text-white/40">{repo.owner.slice(0,4)}...</span> / {repo.name}
                                                      </Link>
                                                  </div>

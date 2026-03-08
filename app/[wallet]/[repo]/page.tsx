@@ -79,7 +79,8 @@ export default function RepoDetail() {
   const wallet = useWallet();
   const params = useParams();
   const router = useRouter();
-  const repoName = decodeURIComponent(Array.isArray(params.name) ? params.name[0] : params.name as string);
+  const ownerAddress = decodeURIComponent(Array.isArray(params.wallet) ? params.wallet[0] : params.wallet as string);
+  const repoName = decodeURIComponent(Array.isArray(params.repo) ? params.repo[0] : params.repo as string);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [activeTab, setActiveTab] = useState<"code" | "issues" | "pull_requests" | "commits" | "branches" | "settings" | "deployments">("code");
@@ -147,7 +148,7 @@ export default function RepoDetail() {
     try {
         setLoading(true);
         // Load basic repo info
-        const repos = await gitService.listRepos();
+        const repos = await gitService.listRepos(ownerAddress);
         const found = repos.find(r => r.name === repoName);
         if (!found) {
              console.error("Repo not found");
@@ -156,11 +157,11 @@ export default function RepoDetail() {
         setRepo(found);
 
         // Load Pull Requests
-        const prs = await gitService.listPullRequests(repoName);
+        const prs = await gitService.listPullRequests(repoName, ownerAddress);
         setPullRequests(prs);
 
         // Load Branches
-        const refs = await gitService.listBranches(repoName);
+        const refs = await gitService.listBranches(repoName, ownerAddress);
         setBranches(refs);
         
         // Determine valid branch
@@ -178,7 +179,7 @@ export default function RepoDetail() {
         }
 
         // Load Commits and Filter by Branch if possible
-        const logs = await gitService.getLog(repoName);
+        const logs = await gitService.getLog(repoName, ownerAddress);
         setCommits(logs);
         
         // Logic: specific branch view vs global log
@@ -209,15 +210,15 @@ export default function RepoDetail() {
         }
 
         // Load Collabs
-        const collabs = await gitService.getCollaborators(repoName);
+        const collabs = await gitService.getCollaborators(repoName, ownerAddress);
         setCollaborators(collabs);
 
         // Load Stars
-        const starList = await gitService.getStars(repoName);
+        const starList = await gitService.getStars(repoName, ownerAddress);
         setStars(starList);
 
         // Load Issues
-        const issueList = await gitService.getIssues(repoName);
+        const issueList = await gitService.getIssues(repoName, ownerAddress);
         setIssues(issueList);
 
     } catch (e) {
@@ -391,7 +392,7 @@ export default function RepoDetail() {
           setProcessing(true);
           await gitService.forkRepo(repoName, repo!.owner, forkName);
           toast.success(`Fork created: ${forkName}`);
-          router.push(`/repos/${forkName}`);
+          router.push(`/${wallet.publicKey!.toBase58()}/${forkName}`);
       } catch (e: any) {
           toast.error("Fork failed: " + e.message);
       } finally {
@@ -1159,7 +1160,7 @@ export default function RepoDetail() {
                                     onReact={async (emoji) => {
                                         await gitService.toggleReaction(selectedIssue.id, "issue", emoji);
                                         // Refresh reactions
-                                        const reactions = await gitService.getReactions(selectedIssue.id);
+                                        const reactions = await gitService.getReactions(selectedIssue.id, ownerAddress);
                                         setIssueReactions(prev => ({ ...prev, [selectedIssue.id]: reactions }));
                                     }}
                                 />
@@ -1217,7 +1218,7 @@ export default function RepoDetail() {
                                                             await gitService.createComment(repoName, selectedIssue.id, newComment);
                                                             setNewComment("");
                                                             // Refresh comments
-                                                            const newComments = await gitService.getComments(repoName, selectedIssue.id);
+                                                            const newComments = await gitService.getComments(repoName, selectedIssue.id, ownerAddress);
                                                             setComments(newComments);
                                                             toast.success("Comment transmitted");
                                                         } catch(e) {
@@ -1250,10 +1251,10 @@ export default function RepoDetail() {
                                         onClick={async () => {
                                             setSelectedIssue(issue);
                                             // Fetch comments
-                                            const c = await gitService.getComments(repoName, issue.id);
+                                            const c = await gitService.getComments(repoName, issue.id, ownerAddress);
                                             setComments(c);
                                             // Load reactions
-                                            const reactions = await gitService.getReactions(issue.id);
+                                            const reactions = await gitService.getReactions(issue.id, ownerAddress);
                                             setIssueReactions(prev => ({ ...prev, [issue.id]: reactions }));
                                         }}
                                         className="p-4 border border-cyber-border bg-cyber-panel/50 hover:border-neon-pink/50 transition-colors group cursor-pointer"
@@ -1370,12 +1371,12 @@ export default function RepoDetail() {
                                  </div>
                                  <div className="flex gap-2">
                                      <a 
-                                        href={`/api/raw/${repoName}/index.html`} 
+                                        href={`/api/raw/${ownerAddress}/${repoName}/index.html`}
                                         target="_blank"
                                         className="flex-1 py-3 cyber-button-primary text-center flex items-center justify-center gap-2 group"
                                      >
                                          <Globe size={16} /> VISIT_LIVE_SITE
-                                         <span className="opacity-50 text-[10px] group-hover:opacity-100 transition-opacity">/api/raw/{repoName}/index.html</span>
+                                         <span className="opacity-50 text-[10px] group-hover:opacity-100 transition-opacity">/api/raw/{ownerAddress}/{repoName}/index.html</span>
                                      </a>
                                  </div>
                                  <p className="text-xs text-center text-white/30 font-tech">

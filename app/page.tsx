@@ -196,7 +196,7 @@ export default function Home() {
             ) : (
                 <div className="grid gap-6">
                     {filteredRepos.map((repo) => (
-                        <Link href={`/repos/${repo.name}`} key={repo.name} className="block group cyber-card p-6 transition-all hover:translate-x-1 hover:border-neon-pink">
+                        <Link href={`/${repo.owner}/${repo.name}`} key={`${repo.owner}-${repo.name}`} className="block group cyber-card p-6 transition-all hover:translate-x-1 hover:border-neon-pink">
                             <div className="absolute top-0 right-0 p-2 opacity-100 flex flex-col items-end gap-1">
                                 <span className="text-[10px] font-mono text-neon-cyan/50">ID: {repo.name.toUpperCase().slice(0, 3)}</span>
                                 {(starCounts[repo.name] || 0) > 0 && (
