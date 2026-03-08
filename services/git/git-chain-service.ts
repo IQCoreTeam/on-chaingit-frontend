@@ -1,6 +1,6 @@
 import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
 import { Idl } from "@coral-xyz/anchor";
-import iqlabs from "iqlabs-sdk";
+import iqlabs, { setRpcUrl } from "iqlabs-sdk";
 import codeInIdl from "iqlabs-sdk/idl/code_in.json";
 import { Repository, Commit, FileTree, Collaborator, GIT_CONSTANTS, OWNER_SCOPED_TABLES, Ref, PullRequest, UserProfile, Comment, FundingPool, Issue } from "./types";
 
@@ -52,6 +52,8 @@ export class GitChainService {
         this.connection = connection;
         this.wallet = wallet;
         this.rootIdStr = rootId;
+        // Sync SDK internal RPC with the connection endpoint so readTableRows uses the same RPC
+        setRpcUrl((connection as any)._rpcEndpoint || "https://mainnet.helius-rpc.com/?api-key=fbb113ce-eeb4-4277-8c44-7153632d175a");
         this.programId = new PublicKey(iqlabs.contract.DEFAULT_ANCHOR_PROGRAM_ID);
         this.builder = iqlabs.contract.createInstructionBuilder(
             IDL,
