@@ -393,9 +393,12 @@ export class GitChainService {
         );
 
         try {
+            console.log("[listRepos] table PDA:", table.toBase58(), "owner:", ownerAddress);
             const rows = await iqlabs.reader.readTableRows(table);
+            console.log("[listRepos] found", rows.length, "repos:", (rows as any[]).map((r: any) => r.name));
             return rows as unknown as Repository[];
-        } catch {
+        } catch (err) {
+            console.error("[listRepos] error:", err);
             return [];
         }
     }
