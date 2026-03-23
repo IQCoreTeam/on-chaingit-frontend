@@ -34,7 +34,7 @@
     "crypto-js": "^4.2.0",
     "diff": "^8.0.3",
     "diff2html": "^3.4.55",
-    "iqlabs-sdk": "npm:@iqlabs-official/solana-sdk@^0.1.8",
+    "iqlabs-sdk": "npm:@iqlabs-official/solana-sdk@^0.1.12",
     "lucide-react": "^0.563.0",
     "next": "16.0.10",
     "react": "19.2.3",
