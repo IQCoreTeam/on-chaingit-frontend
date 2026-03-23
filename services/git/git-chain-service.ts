@@ -32,6 +32,23 @@ if (typeof window !== 'undefined') {
 const IDL = codeInIdl as unknown as Idl;
 const DEFAULT_ROOT_ID = "iq-git-v1";
 
+// Gateway reads — skip RPC entirely for table rows and file content
+// Gateway reads — skip RPC entirely
+const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:3002";
+
+async function gwReadTableRows(tablePda: PublicKey): Promise<unknown[]> {
+    const res = await fetch(`${GATEWAY_URL}/table/${tablePda.toBase58()}/rows?limit=100`);
+    if (!res.ok) throw new Error(`gateway ${res.status}`);
+    const json = await res.json();
+    return json.rows ?? json;
+}
+
+async function gwReadCodeIn(txId: string): Promise<string> {
+    const res = await fetch(`${GATEWAY_URL}/data/${txId}`);
+    if (!res.ok) throw new Error(`gateway ${res.status}`);
+    return res.text();
+}
+
 export interface WalletAdapter {
     publicKey: PublicKey | null;
     signTransaction: (transaction: Transaction) => Promise<Transaction>;
@@ -53,7 +70,7 @@ export class GitChainService {
         this.wallet = wallet;
         this.rootIdStr = rootId;
         // Sync SDK internal RPC with the connection endpoint so readTableRows uses the same RPC
-        setRpcUrl((connection as any)._rpcEndpoint || "https://mainnet.helius-rpc.com/?api-key=fbb113ce-eeb4-4277-8c44-7153632d175a");
+        setRpcUrl((connection as any)._rpcEndpoint || "https://devnet.helius-rpc.com/?api-key=0831d2dc-eac5-40e9-bfef-114ae11baaef");
         this.programId = new PublicKey(iqlabs.contract.DEFAULT_ANCHOR_PROGRAM_ID);
         this.builder = iqlabs.contract.createInstructionBuilder(
             IDL,
@@ -77,11 +94,11 @@ export class GitChainService {
         return Buffer.from(hash);
     }
 
-    /** Compute table seed — owner-scoped tables append the wallet address */
-    private async tableSeed(tableName: string, ownerAddress?: string): Promise<Buffer> {
+    /** Compute table seed — owner-scoped tables append the wallet address. Returns null if wallet needed but not connected. */
+    private async tableSeed(tableName: string, ownerAddress?: string): Promise<Buffer | null> {
         if (OWNER_SCOPED_TABLES.has(tableName)) {
             const owner = ownerAddress || this.wallet.publicKey?.toBase58();
-            if (!owner) throw new Error("Wallet not connected and no ownerAddress provided for owner-scoped table");
+            if (!owner) return null;
             return this.sha256(tableName + "_" + owner);
         }
         return this.sha256(tableName);
@@ -292,6 +309,9 @@ export class GitChainService {
 
         console.log(`Creating ${isPublic ? "public" : "private"} repo '${name}'...`);
 
+        const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
+        const tablePda = iqlabs.contract.getTablePda(dbRoot, seed!, this.programId);
+
         await iqlabs.writer.writeRow(
             this.connection,
             this.signer as any,
@@ -299,6 +319,14 @@ export class GitChainService {
             seed,
             JSON.stringify(row)
         );
+
+        // Invalidate gateway cache so the new repo shows immediately
+        fetch(`${GATEWAY_URL}/table/${tablePda.toBase58()}/notify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+        }).catch(() => {});
+
         console.log("Repo created!");
     }
 
@@ -387,6 +415,7 @@ export class GitChainService {
     async listRepos(ownerAddress?: string): Promise<Repository[]> {
         const dbRootId = await this.getDbRootId();
         const seed = await this.tableSeed(GIT_CONSTANTS.REPOS_TABLE, ownerAddress);
+        if (!seed) return [];
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
         const table = iqlabs.contract.getTablePda(
             dbRoot,
@@ -396,7 +425,7 @@ export class GitChainService {
 
         try {
             console.log("[listRepos] table PDA:", table.toBase58(), "owner:", ownerAddress);
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             console.log("[listRepos] found", rows.length, "repos:", (rows as any[]).map((r: any) => r.name));
             return rows as unknown as Repository[];
         } catch (err) {
@@ -465,7 +494,7 @@ export class GitChainService {
         );
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             return (rows as unknown as Commit[])
                 .filter((c) => c.repoName === repoName)
                 .sort((a, b) => b.timestamp - a.timestamp);
@@ -488,11 +517,11 @@ export class GitChainService {
         }
 
         try {
-            const treeRes = await iqlabs.reader.readCodeIn(treeTxId);
-            if (treeRes.data) {
-                const tree = JSON.parse(treeRes.data);
+            const raw = await gwReadCodeIn(treeTxId);
+            if (raw) {
+                const tree = JSON.parse(raw);
                 this.treeCache.set(treeTxId, tree);
-                this.putToDb("trees", treeTxId, tree); // Cache for next time
+                this.putToDb("trees", treeTxId, tree);
                 return tree;
             }
             return {};
@@ -517,9 +546,8 @@ export class GitChainService {
 
          try {
              // Fallback to legacy read for basic support or internal usage
-             const fileRes = await iqlabs.reader.readCodeIn(txId);
-             if (fileRes.data) {
-                 const content = atob(fileRes.data);
+             const content = await gwReadCodeIn(txId);
+             if (content) {
                  this.fileCache.set(txId, content);
                  this.putToDb("files", txId, content);
                  return content;
@@ -548,13 +576,7 @@ export class GitChainService {
          }
 
          try {
-             const fileRes = await iqlabs.reader.readCodeIn(txId);
-             
-             let content = "";
-             if (fileRes.data) {
-                 // In some versions readCodeIn returns base64 string directly
-                 content = Buffer.from(fileRes.data, "base64").toString("utf-8");
-             }
+             let content = await gwReadCodeIn(txId);
              
              if (repoName && isPrivate) {
                  try {
@@ -587,7 +609,7 @@ export class GitChainService {
         );
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             const allRefs = rows as unknown as Ref[];
 
             // Deduplicate: Keep latest (last) occurrence of each refName
@@ -657,7 +679,7 @@ export class GitChainService {
         );
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             return (rows as unknown as Collaborator[]).filter((c) => c.repoName === repoName);
         } catch {
             return [];
@@ -846,7 +868,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             return (rows as unknown as Issue[])
                 .filter(i => i.repoName === repoName)
                 .sort((a,b) => b.timestamp - a.timestamp);
@@ -888,7 +910,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             return (rows as unknown as Comment[])
                 .filter(c => c.repoName === repoName && c.targetId === targetId)
                 .sort((a,b) => a.timestamp - b.timestamp);
@@ -930,7 +952,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             return (rows as unknown as Star[]).filter(s => s.repoName === repoName);
         } catch {
             return [];
@@ -940,11 +962,12 @@ export class GitChainService {
     async fetchAllStars(ownerAddress?: string): Promise<Star[]> {
         const dbRootId = await this.getDbRootId();
         const seed = await this.tableSeed(EXTENDED_CONSTANTS.STARS_TABLE, ownerAddress);
+        if (!seed) return [];
         const dbRoot = iqlabs.contract.getDbRootPda(dbRootId, this.programId);
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             return rows as unknown as Star[];
         } catch {
             return [];
@@ -994,7 +1017,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             return (rows as any[]).filter(r => r.targetId === targetId);
         } catch {
             return [];
@@ -1008,7 +1031,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             return (rows as unknown as Star[])
                 .filter(s => s.userAddress === userAddress)
                 .map(s => s.repoName);
@@ -1024,7 +1047,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             let commits = rows as unknown as Commit[];
             if (author) {
                 commits = commits.filter(c => c.author === author);
@@ -1070,7 +1093,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             const allPrs = rows as unknown as PullRequest[];
 
             const latestMap = new Map<string, PullRequest>();
@@ -1184,7 +1207,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             // Get all updates for this user
             const updates = (rows as unknown as UserProfile[])
                 .filter(p => p.userAddress === userAddress)
@@ -1204,7 +1227,7 @@ export class GitChainService {
         const table = iqlabs.contract.getTablePda(dbRoot, seed, this.programId);
 
         try {
-            const rows = await iqlabs.reader.readTableRows(table);
+            const rows = await gwReadTableRows(table);
             const pools = rows as unknown as FundingPool[];
             // Only one global pool for now
             const pool = pools.find(p => p.id === "global_qf_pool");

@@ -49,14 +49,14 @@
     "@tailwindcss/postcss": "^4",
     "@types/crypto-js": "^4.2.2",
     "@types/diff": "^7.0.2",
-    "@types/node": "^20",
-    "@types/react": "^19",
+    "@types/node": "20.19.37",
+    "@types/react": "19.2.14",
     "@types/react-dom": "^19",
     "@types/react-syntax-highlighter": "^15.5.13",
     "eslint": "^9",
     "eslint-config-next": "16.0.10",
     "prettier": "^3.6.2",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "5.9.3"
   }
 }

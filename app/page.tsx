@@ -1,7 +1,11 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import dynamic from "next/dynamic";
+const WalletMultiButton = dynamic(
+  () => import("@solana/wallet-adapter-react-ui").then(m => m.WalletMultiButton),
+  { ssr: false }
+);
 import { useEffect, useState, useMemo } from "react";
 import { GitChainService } from "@/services/git/git-chain-service";
 import { Repository, FundingPool } from "@/services/git/types";
@@ -234,6 +238,7 @@ export default function Home() {
                     ))}
                 </div>
             )}
+
           </div>
 
           {/* Create Sidebar */}
