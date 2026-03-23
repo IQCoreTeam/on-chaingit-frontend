@@ -34,7 +34,7 @@ const DEFAULT_ROOT_ID = "iq-git-v1";
 
 // Gateway reads — skip RPC entirely for table rows and file content
 // Gateway reads — skip RPC entirely
-const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:3002";
+const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || "https://gateway.solanainternet.com";
 
 async function gwReadTableRows(tablePda: PublicKey): Promise<unknown[]> {
     const res = await fetch(`${GATEWAY_URL}/table/${tablePda.toBase58()}/rows?limit=100`);
@@ -70,7 +70,7 @@ export class GitChainService {
         this.wallet = wallet;
         this.rootIdStr = rootId;
         // Sync SDK internal RPC with the connection endpoint so readTableRows uses the same RPC
-        setRpcUrl((connection as any)._rpcEndpoint || "https://devnet.helius-rpc.com/?api-key=0831d2dc-eac5-40e9-bfef-114ae11baaef");
+        setRpcUrl((connection as any)._rpcEndpoint || "https://mainnet.helius-rpc.com/?api-key=fbb113ce-eeb4-4277-8c44-7153632d175a");
         this.programId = new PublicKey(iqlabs.contract.DEFAULT_ANCHOR_PROGRAM_ID);
         this.builder = iqlabs.contract.createInstructionBuilder(
             IDL,
