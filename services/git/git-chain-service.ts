@@ -32,7 +32,6 @@ if (typeof window !== 'undefined') {
 const IDL = codeInIdl as unknown as Idl;
 const DEFAULT_ROOT_ID = "iq-git-v1";
 
-// Gateway reads — skip RPC entirely for table rows and file content
 // Gateway reads — skip RPC entirely
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || "https://gateway.solanainternet.com";
 
