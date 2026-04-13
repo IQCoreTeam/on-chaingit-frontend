@@ -137,12 +137,21 @@ export default function RepoDetail() {
   // Reactions
   const [issueReactions, setIssueReactions] = useState<Record<string, { emoji: string; userAddress: string }[]>>({});
 
-  // Initialize service
-  const gitService = useMemo(() => new GitChainService(connection, wallet as any), [connection, wallet]);
+  // Initialize service — depend on wallet.publicKey's base58 (stable string) instead of
+  // the wallet object itself, which is a new reference every render and would cause
+  // gitService to be re-created on each render and kick off an infinite loadData loop
+  // when any RPC call fails.
+  const walletPubkey = wallet?.publicKey?.toBase58() ?? null;
+  const gitService = useMemo(
+    () => new GitChainService(connection, wallet as any),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connection, walletPubkey],
+  );
 
   useEffect(() => {
      loadData();
-  }, [gitService, repoName, selectedBranch]);
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletPubkey, repoName, selectedBranch]);
 
   const loadData = async () => {
     try {

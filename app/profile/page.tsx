@@ -35,7 +35,12 @@ export default function ProfilePage() {
     // UI state
     const [searchQuery, setSearchQuery] = useState("");
 
-    const gitService = useMemo(() => new GitChainService(connection, wallet as any), [connection, wallet]);
+    const walletPubkey = wallet?.publicKey?.toBase58() ?? null;
+    const gitService = useMemo(
+        () => new GitChainService(connection, wallet as any),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [connection, walletPubkey],
+    );
 
     useEffect(() => {
         if (wallet.publicKey) {
@@ -43,7 +48,8 @@ export default function ProfilePage() {
         } else {
             setLoading(false);
         }
-    }, [gitService, wallet.publicKey]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [walletPubkey]);
 
     const loadAll = async () => {
         if (!wallet.publicKey) return;

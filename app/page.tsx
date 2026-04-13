@@ -52,8 +52,14 @@ export default function Home() {
       return result;
   }, [repos, filter, wallet.publicKey, starCounts]);
 
-  // Re-instantiate service when wallet/connection changes
-  const gitService = useMemo(() => new GitChainService(connection, wallet as any), [connection, wallet]);
+  // Re-instantiate service when wallet/connection changes.
+  // Depend on the base58 pubkey string (stable), not the wallet object (new ref each render).
+  const walletPubkey = wallet?.publicKey?.toBase58() ?? null;
+  const gitService = useMemo(
+    () => new GitChainService(connection, wallet as any),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connection, walletPubkey],
+  );
 
   const fetchRepos = async () => {
      try {
