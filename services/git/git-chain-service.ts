@@ -1,7 +1,5 @@
-import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";
-import { Idl } from "@coral-xyz/anchor";
+import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction, VersionedTransaction } from "@solana/web3.js";
 import iqlabs, { setRpcUrl } from "iqlabs-sdk";
-import codeInIdl from "iqlabs-sdk/idl/code_in.json";
 import { Repository, Commit, FileTree, Collaborator, GIT_CONSTANTS, OWNER_SCOPED_TABLES, Ref, PullRequest, UserProfile, Comment, FundingPool, Issue } from "./types";
 
 export interface Star {
@@ -29,7 +27,6 @@ if (typeof window !== 'undefined') {
     window.Buffer = window.Buffer || Buffer;
 }
 
-const IDL = codeInIdl as unknown as Idl;
 const DEFAULT_ROOT_ID = "iq-git-v1";
 
 export interface WalletAdapter {
@@ -55,10 +52,7 @@ export class GitChainService {
         // Sync SDK internal RPC with the connection endpoint so readTableRows uses the same RPC
         setRpcUrl((connection as any)._rpcEndpoint || "https://mainnet.helius-rpc.com/?api-key=fbb113ce-eeb4-4277-8c44-7153632d175a");
         this.programId = new PublicKey(iqlabs.contract.DEFAULT_ANCHOR_PROGRAM_ID);
-        this.builder = iqlabs.contract.createInstructionBuilder(
-            IDL,
-            this.programId
-        );
+        this.builder = iqlabs.contract.createInstructionBuilder();
     }
 
     private async getDbRootId(): Promise<Buffer> {
@@ -88,11 +82,17 @@ export class GitChainService {
     }
 
     private get signer() {
-         if (!this.wallet.publicKey) throw new Error("Wallet not connected");
+         const publicKey = this.wallet.publicKey;
+         if (!publicKey) throw new Error("Wallet not connected");
+         const wallet = this.wallet;
          return {
-             publicKey: this.wallet.publicKey,
-             signTransaction: this.wallet.signTransaction.bind(this.wallet),
-             signAllTransactions: this.wallet.signAllTransactions.bind(this.wallet)
+             publicKey,
+             signTransaction: async <T extends Transaction | VersionedTransaction>(tx: T): Promise<T> => {
+                 return (await wallet.signTransaction(tx as any)) as T;
+             },
+             signAllTransactions: async <T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> => {
+                 return (await wallet.signAllTransactions(txs as any)) as T[];
+             },
          };
     }
 
@@ -254,7 +254,7 @@ export class GitChainService {
                     table: tablePda,
                     signer: this.wallet.publicKey,
                     system_program: SystemProgram.programId,
-                    receiver: this.wallet.publicKey,
+                    receiver: new PublicKey(iqlabs.constants.DEFAULT_WRITE_FEE_RECEIVER),
                     instruction_table: iqlabs.contract.getInstructionTablePda(
                         dbRoot,
                         tableSeed,
@@ -264,11 +264,12 @@ export class GitChainService {
                 {
                     db_root_id: dbRootId,
                     table_seed: tableSeed,
+                    table_hint: Buffer.from(tableName),
                     table_name: Buffer.from(tableName),
                     column_names: columns.map((c) => Buffer.from(c)),
                     id_col: Buffer.from(idCol),
                     ext_keys: [],
-                    gate_mint_opt: null,
+                    gate_opt: null,
                     writers_opt: null,
                 }
             );
@@ -294,7 +295,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify(row)
@@ -328,7 +329,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             repoSeed,
             JSON.stringify(forkRow)
@@ -356,7 +357,7 @@ export class GitChainService {
                  const commitSeed = await this.tableSeed(GIT_CONSTANTS.COMMITS_TABLE);
                  await iqlabs.writer.writeRow(
                      this.connection,
-                     this.signer as any,
+                     this.signer,
                      dbRootId,
                      commitSeed,
                      JSON.stringify(forkCommit)
@@ -374,7 +375,7 @@ export class GitChainService {
         const forkSeed = await this.tableSeed(EXTENDED_CONSTANTS.FORKS_TABLE);
         await iqlabs.writer.writeRow(
              this.connection,
-             this.signer as any,
+             this.signer,
              dbRootId,
              forkSeed,
              JSON.stringify(forkMeta)
@@ -613,7 +614,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify({ repoName, refName: branchName, commitId })
@@ -638,7 +639,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify({ repoName, userAddress, role: "writer" })
@@ -744,7 +745,7 @@ export class GitChainService {
              while (retries > 0 && !success) {
                  try {
                      const txId: string = await iqlabs.writer.codeIn(
-                         { connection: this.connection, signer: this.signer as any },
+                         { connection: this.connection, signer: this.signer },
                          chunks,
                          f.path.split('/').pop() || "file",
                          0,
@@ -777,7 +778,7 @@ export class GitChainService {
          const treeJson = JSON.stringify(fileTree);
          const treeChunks = chunkString(treeJson, DEFAULT_CHUNK_SIZE);
          const treeTxId = await iqlabs.writer.codeIn(
-             { connection: this.connection, signer: this.signer as any },
+             { connection: this.connection, signer: this.signer },
              treeChunks,
              "tree.json",
              0,
@@ -800,7 +801,7 @@ export class GitChainService {
 
          await iqlabs.writer.writeRow(
              this.connection,
-             this.signer as any,
+             this.signer,
              dbRootId,
              commitSeed,
              JSON.stringify(commit)
@@ -831,7 +832,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify(issue)
@@ -873,7 +874,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify(comment)
@@ -914,7 +915,7 @@ export class GitChainService {
         } else {
             await iqlabs.writer.writeRow(
                 this.connection,
-                this.signer as any,
+                this.signer,
                 dbRootId,
                 seed,
                 JSON.stringify({ repoName, userAddress: myAddr })
@@ -979,7 +980,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify(reaction)
@@ -1055,7 +1056,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify(pr)
@@ -1104,7 +1105,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             prSeed,
             JSON.stringify(updatedPr)
@@ -1136,7 +1137,7 @@ export class GitChainService {
                        };
                        await iqlabs.writer.writeRow(
                             this.connection,
-                            this.signer as any,
+                            this.signer,
                             dbRootId,
                             issueSeed,
                             JSON.stringify(updatedIssue)
@@ -1169,7 +1170,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify(profile)
@@ -1250,7 +1251,7 @@ export class GitChainService {
 
         await iqlabs.writer.writeRow(
             this.connection,
-            this.signer as any,
+            this.signer,
             dbRootId,
             seed,
             JSON.stringify(updated)
