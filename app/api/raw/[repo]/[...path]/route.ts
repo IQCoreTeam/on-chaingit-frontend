@@ -1,12 +1,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { GitChainService } from "@/services/git/git-chain-service";
-import { Connection, clusterApiUrl } from "@solana/web3.js";
+import { Connection } from "@solana/web3.js";
 import { Repository, Commit, FileTree } from "@/services/git/types";
 
-// We need a connection instance on the server side
-// Note: In a real app we might use a dedicated RPC endpoint env var
-const connection = new Connection(clusterApiUrl("devnet"));
+// Server-side connection — prefers private env var (not exposed to client).
+const RPC_URL =
+    process.env.RPC_ENDPOINT ||
+    process.env.NEXT_PUBLIC_RPC_ENDPOINT ||
+    "https://mainnet.helius-rpc.com/?api-key=ab814e2b-59a3-4ca9-911a-665f06fb5f09";
+const connection = new Connection(RPC_URL);
 
 // We need a read-only wallet adapter dummy since we are just reading
 const dummyWallet = {

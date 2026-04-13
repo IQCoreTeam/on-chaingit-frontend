@@ -49,8 +49,17 @@ export class GitChainService {
         this.connection = connection;
         this.wallet = wallet;
         this.rootIdStr = rootId;
-        // Sync SDK internal RPC with the connection endpoint so readTableRows uses the same RPC
-        setRpcUrl((connection as any)._rpcEndpoint || "https://mainnet.helius-rpc.com/?api-key=fbb113ce-eeb4-4277-8c44-7153632d175a");
+        // Sync SDK internal RPC with the connection endpoint so readTableRows uses the same RPC.
+        // Priority: NEXT_PUBLIC_RPC_ENDPOINT env var -> connection endpoint -> mainnet-beta public RPC.
+        const envRpc =
+            typeof process !== "undefined" && process.env?.NEXT_PUBLIC_RPC_ENDPOINT
+                ? process.env.NEXT_PUBLIC_RPC_ENDPOINT
+                : undefined;
+        const rpcUrl =
+            envRpc ||
+            (connection as any)._rpcEndpoint ||
+            "https://mainnet.helius-rpc.com/?api-key=ab814e2b-59a3-4ca9-911a-665f06fb5f09";
+        setRpcUrl(rpcUrl);
         this.programId = new PublicKey(iqlabs.contract.DEFAULT_ANCHOR_PROGRAM_ID);
         this.builder = iqlabs.contract.createInstructionBuilder();
     }

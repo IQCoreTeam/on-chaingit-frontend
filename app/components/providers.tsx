@@ -12,8 +12,13 @@ import "@solana/wallet-adapter-react-ui/styles.css";
 import { Toaster } from 'sonner';
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const endpoint = useMemo(() => "https://mainnet.helius-rpc.com/?api-key=fbb113ce-eeb4-4277-8c44-7153632d175a", []);
-  
+  const endpoint = useMemo(
+    () =>
+      process.env.NEXT_PUBLIC_RPC_ENDPOINT ||
+      "https://mainnet.helius-rpc.com/?api-key=ab814e2b-59a3-4ca9-911a-665f06fb5f09",
+    [],
+  );
+
   // Wallets are implicitly detected by the Wallet Standard
   const wallets = useMemo(() => [], []);
 
