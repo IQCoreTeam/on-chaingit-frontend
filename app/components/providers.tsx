@@ -15,7 +15,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const endpoint = useMemo(
     () =>
       process.env.NEXT_PUBLIC_RPC_ENDPOINT ||
-      "https://mainnet.helius-rpc.com/?api-key=ab814e2b-59a3-4ca9-911a-665f06fb5f09",
+      "https://mainnet.helius-rpc.com/?api-key=a0b8ead5-9dc8-4926-b537-9a4b32439f2f",
     [],
   );
 

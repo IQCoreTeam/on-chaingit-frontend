@@ -58,7 +58,7 @@ export class GitChainService {
         const rpcUrl =
             envRpc ||
             (connection as any)._rpcEndpoint ||
-            "https://mainnet.helius-rpc.com/?api-key=ab814e2b-59a3-4ca9-911a-665f06fb5f09";
+            "https://mainnet.helius-rpc.com/?api-key=a0b8ead5-9dc8-4926-b537-9a4b32439f2f";
         setRpcUrl(rpcUrl);
         this.programId = new PublicKey(iqlabs.contract.DEFAULT_ANCHOR_PROGRAM_ID);
         this.builder = iqlabs.contract.createInstructionBuilder();
