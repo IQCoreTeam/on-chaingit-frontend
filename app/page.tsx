@@ -136,6 +136,9 @@ export default function Home() {
              <span className="text-xs text-neon-cyan font-mono border border-neon-cyan px-1 uppercase opacity-60">v0.9.beta</span>
           </div>
           <div className="flex items-center gap-4">
+              <Link href="/pages" className="text-sm font-tech text-neon-pink hover:text-white px-4 py-2 hover:bg-neon-pink/10 transition-colors uppercase tracking-widest border border-transparent hover:border-neon-pink hidden md:block">
+                  Pages
+              </Link>
               <Link href="/profile" className="text-sm font-tech text-neon-cyan hover:text-white px-4 py-2 hover:bg-neon-cyan/10 transition-colors uppercase tracking-widest border border-transparent hover:border-neon-cyan hidden md:block">
                   My // Profile
               </Link>

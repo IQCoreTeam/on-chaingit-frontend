@@ -17,6 +17,7 @@ import ContributionGraph from '@/app/components/ContributionGraph';
 import ReactionBar from '@/app/components/ReactionBar';
 import { RepoPageSkeleton, FileTreeSkeleton, CodeViewerSkeleton, ListSkeleton, CommitSkeleton, IssueSkeleton, BranchSkeleton } from '@/app/components/Skeleton';
 import { usePrefetchFile } from '@/hooks/useGitData';
+import PagesStatusPanel from '@/app/components/PagesStatusPanel';
 
 // Helper to determine language
 const getLanguage = (filename: string) => {
@@ -1352,14 +1353,15 @@ export default function RepoDetail() {
             {/* DEPLOYMENTS TAB */}
             {activeTab === "deployments" && (
                 <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in">
+                     <PagesStatusPanel ownerAddress={ownerAddress} repoName={repoName} />
                      <div className="cyber-card p-8 border-neon-cyan/50 bg-black/40">
                          <div className="flex items-center gap-4 mb-6">
                              <div className="w-12 h-12 rounded border border-neon-cyan bg-neon-cyan/10 flex items-center justify-center text-neon-cyan shadow-[0_0_15px_rgba(0,243,255,0.3)]">
-                                 <Globe size={24} /> 
+                                 <Globe size={24} />
                              </div>
                              <div>
-                                 <h2 className="text-2xl font-bold text-white font-cyber tracking-wide">SOLGIT PAGES</h2>
-                                 <p className="text-sm text-white/50 font-mono">Decentralized Static Hosting for this Repository</p>
+                                 <h2 className="text-2xl font-bold text-white font-cyber tracking-wide">SOLGIT PAGES (RAW)</h2>
+                                 <p className="text-sm text-white/50 font-mono">Direct static file serving from the latest commit</p>
                              </div>
                          </div>
 
