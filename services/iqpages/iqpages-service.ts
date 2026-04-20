@@ -218,7 +218,10 @@ export class IqpagesService {
       seed,
     );
 
-    // 2. Fee transfer after table creation succeeded
+    // 2. Fee transfer after table creation succeeded. Wait for confirmation
+    // so the caller knows the 0.2 SOL actually settled before returning —
+    // otherwise a UI toast "Deployed!" could fire while the fee is still
+    // floating and potentially fail (blockhash expiry, network drop, etc.).
     const transferTx = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: publicKey,
@@ -227,10 +230,18 @@ export class IqpagesService {
       }),
     );
     transferTx.feePayer = publicKey;
-    const { blockhash } = await this.connection.getLatestBlockhash();
-    transferTx.recentBlockhash = blockhash;
+    const latest = await this.connection.getLatestBlockhash();
+    transferTx.recentBlockhash = latest.blockhash;
     const signed = await this.wallet.signTransaction(transferTx);
-    await this.connection.sendRawTransaction(signed.serialize());
+    const feeSig = await this.connection.sendRawTransaction(signed.serialize());
+    await this.connection.confirmTransaction(
+      {
+        signature: feeSig,
+        blockhash: latest.blockhash,
+        lastValidBlockHeight: latest.lastValidBlockHeight,
+      },
+      "confirmed",
+    );
 
     return sig;
   }
