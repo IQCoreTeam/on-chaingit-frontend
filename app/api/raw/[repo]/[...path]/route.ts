@@ -8,7 +8,7 @@ import { Repository, Commit, FileTree } from "@/services/git/types";
 const RPC_URL =
     process.env.RPC_ENDPOINT ||
     process.env.NEXT_PUBLIC_RPC_ENDPOINT ||
-    "https://mainnet.helius-rpc.com/?api-key=a0b8ead5-9dc8-4926-b537-9a4b32439f2f";
+    "https://mainnet.helius-rpc.com/?api-key=767cde04-93dd-4e62-9580-978c74febc93";
 const connection = new Connection(RPC_URL);
 
 // We need a read-only wallet adapter dummy since we are just reading

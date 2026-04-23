@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { GitChainService, Star as StarType } from "@/services/git/git-chain-service";
 import { Repository, Commit, FileTree, Ref, Collaborator, PullRequest, Comment, Issue } from "@/services/git/types";
-import { ArrowLeft, GitCommit, GitBranch, Folder, FileCode, Users, Clock, Copy, Check, FilePlus, Edit2, Save, X, GitFork, AlertCircle, Star, GitPullRequest, UploadCloud, Coins, ChevronDown, MessageSquare, Globe } from "lucide-react";
+import { ArrowLeft, GitCommit, GitBranch, Folder, FileCode, Users, Clock, Copy, Check, FilePlus, Edit2, Save, X, GitFork, AlertCircle, Star, GitPullRequest, UploadCloud, Coins, ChevronDown, MessageSquare, Globe, ExternalLink } from "lucide-react";
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -99,7 +99,7 @@ export default function RepoDetail() {
   
   // File viewing
   // File viewing & Editing
-  const [selectedFile, setSelectedFile] = useState<{ path: string; content: string | null; loading: boolean } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{ path: string; content: string | null; loading: boolean; txId?: string } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editedContent, setEditedContent] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
@@ -211,9 +211,9 @@ export default function RepoDetail() {
                  const readmeEntry = Object.entries(treeMap).find(([p]) => p.toLowerCase() === 'readme.md');
                  if (readmeEntry) {
                      const [path, entry] = readmeEntry;
-                     setSelectedFile({ path, content: null, loading: true });
+                     setSelectedFile({ path, content: null, loading: true, txId: entry.txId });
                      const content = await gitService.getFile(entry.txId);
-                     setSelectedFile({ path, content, loading: false });
+                     setSelectedFile({ path, content, loading: false, txId: entry.txId });
                      setEditedContent(content || "");
                  }
             }
@@ -291,9 +291,9 @@ export default function RepoDetail() {
       setIsCreatingFile(false);
       
       if (node.txId) {
-          setSelectedFile({ path: node.path, content: null, loading: true });
+          setSelectedFile({ path: node.path, content: null, loading: true, txId: node.txId });
           const content = await gitService.getFileContent(node.txId, repo?.name, !repo?.isPublic);
-          setSelectedFile({ path: node.path, content, loading: false });
+          setSelectedFile({ path: node.path, content, loading: false, txId: node.txId });
           setEditedContent(content || "");
       }
   };
@@ -755,7 +755,18 @@ export default function RepoDetail() {
                                     <div className="flex items-center gap-2">
                                         {!isEditing && !isCreatingFile && (
                                             <>
-                                                <button 
+                                                {selectedFile?.txId && (
+                                                    <a
+                                                      href={`https://solscan.io/tx/${selectedFile.txId}`}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="flex items-center gap-2 px-4 py-1 border border-neon-cyan text-neon-cyan hover:bg-neon-cyan/10 font-tech text-xs uppercase tracking-wider transition-colors"
+                                                      title={`View tx ${selectedFile.txId} on Solscan`}
+                                                    >
+                                                        <ExternalLink size={14} /> SEE SOLSCAN
+                                                    </a>
+                                                )}
+                                                <button
                                                   onClick={startEditing}
                                                   className="flex items-center gap-2 px-4 py-1 border border-neon-yellow text-neon-yellow hover:bg-neon-yellow/10 font-tech text-xs uppercase tracking-wider transition-colors"
                                                 >
