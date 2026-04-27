@@ -1,14 +1,18 @@
 "use client";
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+// Wallet page — repos owned by the address in the URL. Cyberpunk shell from
+// v1; data via `@iqlabs-official/git-sdk/browser` `readOwnerRepos`.
+
+import { useOwnerRepos } from "@/hooks/useGitData";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
 import { PublicKey } from "@solana/web3.js";
-import { Box, RefreshCw, Star, User } from "lucide-react";
-import { GitChainService } from "@/services/git/git-chain-service";
-import { Repository } from "@/services/git/types";
+import { Box, RefreshCw, User } from "lucide-react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useState } from "react";
+
+const PAGE_SIZE = 30;
 
 function isPubkey(s: string | undefined): s is string {
   if (!s) return false;
@@ -20,62 +24,23 @@ function isPubkey(s: string | undefined): s is string {
   }
 }
 
-function shortWallet(w: string) {
-  return `${w.slice(0, 4)}…${w.slice(-4)}`;
-}
+const shortWallet = (w: string) => `${w.slice(0, 4)}…${w.slice(-4)}`;
 
 export default function WalletReposPage() {
   const params = useParams<{ wallet: string }>();
   const walletParam = params?.wallet ? decodeURIComponent(params.wallet) : undefined;
   const validWallet = isPubkey(walletParam) ? walletParam : null;
 
-  const { connection } = useConnection();
   const wallet = useWallet();
+  const myAddr = wallet.publicKey?.toBase58();
 
-  const [repos, setRepos] = useState<Repository[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [starCounts, setStarCounts] = useState<Record<string, number>>({});
-
-  const walletPubkey = wallet?.publicKey?.toBase58() ?? null;
-  const gitService = useMemo(
-    () => new GitChainService(connection, wallet as any),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [connection, walletPubkey],
-  );
-
-  const fetchRepos = async () => {
-    if (!validWallet) return;
-    try {
-      setLoading(true);
-      const list = await gitService.listRepos(validWallet);
-      list.sort((a, b) => b.timestamp - a.timestamp);
-      setRepos(list);
-
-      const allStars = await gitService.fetchAllStars();
-      const counts: Record<string, number> = {};
-      allStars.forEach((s) => {
-        counts[s.repoName] = (counts[s.repoName] || 0) + 1;
-      });
-      setStarCounts(counts);
-    } catch (e) {
-      console.error("Failed to fetch repos for wallet", e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchRepos();
-    const interval = setInterval(fetchRepos, 15000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gitService, validWallet]);
+  const { data: repos, isFetching, refetch } = useOwnerRepos(validWallet ?? undefined);
+  const [visible, setVisible] = useState(PAGE_SIZE);
 
   return (
     <div className="min-h-screen bg-cyber-bg text-foreground font-sans relative overflow-x-hidden">
       <div className="scanline"></div>
 
-      {/* Navbar */}
       <nav className="border-b border-cyber-border bg-cyber-bg/90 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-4">
@@ -93,9 +58,11 @@ export default function WalletReposPage() {
             <Link href="/pages" className="text-sm font-tech text-neon-pink hover:text-white px-4 py-2 hover:bg-neon-pink/10 transition-colors uppercase tracking-widest border border-transparent hover:border-neon-pink hidden md:block">
               Pages
             </Link>
-            <Link href="/profile" className="text-sm font-tech text-neon-cyan hover:text-white px-4 py-2 hover:bg-neon-cyan/10 transition-colors uppercase tracking-widest border border-transparent hover:border-neon-cyan hidden md:block">
-              My // Profile
-            </Link>
+            {myAddr && (
+              <Link href={`/${myAddr}`} className="text-sm font-tech text-neon-cyan hover:text-white px-4 py-2 hover:bg-neon-cyan/10 transition-colors uppercase tracking-widest border border-transparent hover:border-neon-cyan hidden md:block">
+                My // Repos
+              </Link>
+            )}
             <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
           </div>
         </div>
@@ -108,7 +75,6 @@ export default function WalletReposPage() {
           </div>
         ) : (
           <>
-            {/* Owner header */}
             <div className="flex items-center justify-between border-b border-cyber-border pb-4 mb-6">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 border border-neon-cyan bg-neon-cyan/10 flex items-center justify-center">
@@ -124,19 +90,19 @@ export default function WalletReposPage() {
                 </div>
               </div>
               <button
-                onClick={fetchRepos}
+                onClick={() => refetch()}
                 className="p-2 border border-cyber-border hover:border-neon-cyan text-white/60 hover:text-neon-cyan transition-all"
                 title="Refresh"
               >
-                <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
+                <RefreshCw size={20} className={isFetching ? "animate-spin" : ""} />
               </button>
             </div>
 
-            {loading && repos.length === 0 ? (
+            {isFetching && (!repos || repos.length === 0) ? (
               <div className="h-64 flex items-center justify-center border border-dashed border-white/10 bg-white/5 animate-pulse font-tech text-neon-cyan">
                 [ SCANNING CHAIN ... ]
               </div>
-            ) : repos.length === 0 ? (
+            ) : !repos || repos.length === 0 ? (
               <div className="h-64 flex flex-col items-center justify-center border border-dashed border-white/10 bg-white/[0.02]">
                 <div className="mb-4 text-neon-pink animate-pulse">
                   <Box size={48} />
@@ -147,22 +113,16 @@ export default function WalletReposPage() {
               </div>
             ) : (
               <div className="grid gap-6">
-                {repos.map((repo) => (
+                {repos.slice(0, visible).map((repo) => (
                   <Link
-                    href={`/${repo.owner}/${repo.name}`}
-                    key={`${repo.owner}-${repo.name}`}
-                    className="block group cyber-card p-6 transition-all hover:translate-x-1 hover:border-neon-pink"
+                    href={`/${validWallet}/${repo.name}`}
+                    key={repo.name}
+                    className="block group cyber-card p-6 transition-all hover:translate-x-1 hover:border-neon-pink relative"
                   >
-                    <div className="absolute top-0 right-0 p-2 opacity-100 flex flex-col items-end gap-1">
+                    <div className="absolute top-0 right-0 p-2">
                       <span className="text-[10px] font-mono text-neon-cyan/50">
                         ID: {repo.name.toUpperCase().slice(0, 3)}
                       </span>
-                      {(starCounts[repo.name] || 0) > 0 && (
-                        <div className="flex items-center gap-1 text-neon-yellow text-xs font-bold font-tech border border-neon-yellow/30 px-2 py-0.5 bg-neon-yellow/5">
-                          <Star size={10} className="fill-neon-yellow" />
-                          {starCounts[repo.name]}
-                        </div>
-                      )}
                     </div>
                     <div className="flex justify-between items-start">
                       <div>
@@ -179,7 +139,7 @@ export default function WalletReposPage() {
                           >
                             {repo.isPublic ? "PUB" : "PVT"}
                           </span>
-                          {wallet.publicKey && repo.owner === wallet.publicKey.toBase58() && (
+                          {myAddr === validWallet && (
                             <span className="text-[10px] font-tech uppercase tracking-wider px-2 py-0.5 border border-neon-cyan text-neon-cyan bg-neon-cyan/10">
                               OWNER
                             </span>
@@ -197,6 +157,15 @@ export default function WalletReposPage() {
                     </div>
                   </Link>
                 ))}
+
+                {repos.length > visible && (
+                  <button
+                    onClick={() => setVisible((v) => v + PAGE_SIZE)}
+                    className="self-center mt-2 px-6 py-2 border border-cyber-border text-neon-cyan/70 hover:text-neon-cyan hover:border-neon-cyan font-tech uppercase text-xs tracking-widest transition-all"
+                  >
+                    Load_More ({Math.min(PAGE_SIZE, repos.length - visible)})
+                  </button>
+                )}
               </div>
             )}
           </>

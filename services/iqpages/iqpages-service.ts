@@ -1,8 +1,29 @@
-import { PublicKey, SystemProgram, Transaction, VersionedTransaction } from "@solana/web3.js";
+// IqpagesService — single `iqpages-root/deployed` table model.
+//
+//   • deploy() = append one row {id: "<owner>:<repo>", owner, repo, deployedAt}
+//   • isDeployed() = look up by id
+//   • listAll() = readRows of the single table
+//   • readConfig/readProfile = always pull from the repo's *current* git
+//     commit via @iqlabs-official/git-sdk helpers — no on-chain snapshot caching.
+//
+// One-time fee (FEE_LAMPORTS) is transferred alongside the deploy row so
+// the marker registration is atomic from the user's perspective.
+
+import {
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  type Connection,
+  type VersionedTransaction,
+} from "@solana/web3.js";
 import iqlabs from "iqlabs-sdk";
-import type { Connection } from "@solana/web3.js";
-import type { WalletAdapter } from "../git/git-chain-service";
-import { GitChainService } from "../git/git-chain-service";
+import type { SignerInput } from "iqlabs-sdk/utils";
+import {
+  loadBlob,
+  loadTree,
+  notifyGateway,
+  readLatestCommit,
+} from "@/lib/gateway/reader";
 
 export interface IqpagesConfig {
   name: string;
@@ -15,14 +36,12 @@ export interface IqprofileConfig {
   displayName: string;
   description: string;
   icon?: string;
-  routes?: {
-    profile?: string;
-    myPage?: string;
-  };
+  routes?: { profile?: string; myPage?: string };
 }
 
 export const IQPAGES_CONSTANTS = {
   ROOT_ID: "iqpages-root",
+  TABLE_HINT: "deployed",
   FEE_LAMPORTS: 200_000_000,
   FEE_RECIPIENT: "EWNSTD8tikwqHMcRNuuNbZrnYJUiJdKq9UXLXSEU4wZ1",
   CONFIG_FILENAME: "iqpages.json",
@@ -49,7 +68,7 @@ export const IQPROFILE_TEMPLATE = `{
 
 export function validateIqpagesConfig(obj: unknown): asserts obj is IqpagesConfig {
   if (!obj || typeof obj !== "object") throw new Error("invalid iqpages.json");
-  const { name, version, description, entry } = obj as any;
+  const { name, version, description, entry } = obj as IqpagesConfig;
   if (typeof name !== "string" || !name) throw new Error("iqpages.json: name required");
   if (typeof version !== "string" || !version) throw new Error("iqpages.json: version required");
   if (typeof description !== "string") throw new Error("iqpages.json: description required");
@@ -58,141 +77,117 @@ export function validateIqpagesConfig(obj: unknown): asserts obj is IqpagesConfi
 
 export function validateIqprofileConfig(obj: unknown): asserts obj is IqprofileConfig {
   if (!obj || typeof obj !== "object") throw new Error("invalid iqprofile.json");
-  const { displayName, description } = obj as any;
+  const { displayName, description } = obj as IqprofileConfig;
   if (typeof displayName !== "string") throw new Error("iqprofile.json: displayName required");
   if (typeof description !== "string") throw new Error("iqprofile.json: description required");
 }
 
-function buildSeed(owner: string, repoName: string): string {
-  return `${owner}:${repoName}`;
+const buildId = (owner: string, repo: string) => `${owner}:${repo}`;
+
+interface WalletAdapter {
+  publicKey: PublicKey | null;
+  signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T>;
+  signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]>;
 }
 
-function parseSeedFromHex(hex: string): { owner: string; repoName: string } | null {
-  try {
-    const plain = Buffer.from(hex, "hex").toString("utf8");
-    const idx = plain.indexOf(":");
-    if (idx <= 0) return null;
-    return { owner: plain.slice(0, idx), repoName: plain.slice(idx + 1) };
-  } catch {
-    return null;
-  }
+export interface DeploymentRow {
+  id: string;
+  owner: string;
+  repo: string;
+  deployedAt: number;
+}
+
+function tablePda(): PublicKey {
+  const rootSeed = iqlabs.utils.toSeedBytes(IQPAGES_CONSTANTS.ROOT_ID);
+  const tableSeed = iqlabs.utils.toSeedBytes(IQPAGES_CONSTANTS.TABLE_HINT);
+  const dbRoot = iqlabs.contract.getDbRootPda(rootSeed);
+  return iqlabs.contract.getTablePda(dbRoot, tableSeed);
 }
 
 export class IqpagesService {
   readonly connection: Connection;
   readonly wallet: WalletAdapter;
-  readonly programId: PublicKey;
-  private readonly git: GitChainService;
 
   constructor(connection: Connection, wallet: WalletAdapter) {
     this.connection = connection;
     this.wallet = wallet;
-    this.programId = new PublicKey(iqlabs.contract.DEFAULT_ANCHOR_PROGRAM_ID);
-    this.git = new GitChainService(connection, wallet);
   }
 
-  private get signer() {
-    const publicKey = this.wallet.publicKey;
-    if (!publicKey) throw new Error("Wallet not connected");
-    const wallet = this.wallet;
+  private get signer(): SignerInput {
+    if (!this.wallet.publicKey) throw new Error("Wallet not connected");
     return {
-      publicKey,
-      signTransaction: async <T extends Transaction | VersionedTransaction>(tx: T): Promise<T> => {
-        return (await wallet.signTransaction(tx as any)) as T;
-      },
-      signAllTransactions: async <T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]> => {
-        return (await wallet.signAllTransactions(txs as any)) as T[];
-      },
+      publicKey: this.wallet.publicKey,
+      signTransaction: this.wallet.signTransaction.bind(this.wallet),
+      signAllTransactions: this.wallet.signAllTransactions.bind(this.wallet),
     };
   }
 
-  private tablePda(owner: string, repoName: string): PublicKey {
-    const rootSeed = iqlabs.utils.toSeedBytes(IQPAGES_CONSTANTS.ROOT_ID);
-    const tableSeed = iqlabs.utils.toSeedBytes(buildSeed(owner, repoName));
-    const dbRoot = iqlabs.contract.getDbRootPda(rootSeed, this.programId);
-    return iqlabs.contract.getTablePda(dbRoot, tableSeed, this.programId);
-  }
-
-  async isDeployed(owner: string, repoName: string): Promise<boolean> {
-    const info = await this.connection.getAccountInfo(this.tablePda(owner, repoName));
-    return info !== null;
-  }
-
-  async listAll(): Promise<{ owner: string; repoName: string }[]> {
-    const { tableSeeds } = await iqlabs.reader.getTablelistFromRoot(
-      this.connection,
-      IQPAGES_CONSTANTS.ROOT_ID,
-    );
-    return tableSeeds
-      .map((hex: string) => parseSeedFromHex(hex))
-      .filter((v: { owner: string; repoName: string } | null): v is { owner: string; repoName: string } => v !== null);
-  }
-
-  /** Read a single file from the latest commit of the given repo. Returns null if missing. */
-  private async readFileFromLatest(owner: string, repoName: string, filePath: string): Promise<string | null> {
-    let commits;
+  async listAll(): Promise<DeploymentRow[]> {
+    const pda = tablePda();
     try {
-      commits = await this.git.getLog(repoName, owner);
-    } catch {
-      return null;
+      const url = `https://gateway.solanainternet.com/table/${pda.toBase58()}/rows`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const rows = Array.isArray(data) ? data : data.rows ?? [];
+        return rows as DeploymentRow[];
+      }
+    } catch (e) {
+      console.warn("[gateway] iqpages listAll fallback to RPC", e);
     }
-    if (!commits || commits.length === 0) return null;
-
-    const latest = commits[0];
-    const tree = await this.git.getTree(latest.treeTxId);
-    const entry = tree[filePath];
-    if (!entry) return null;
-
-    return await this.git.getFile(entry.txId);
+    const rows = await iqlabs.reader.readTableRows(pda);
+    return rows as unknown as DeploymentRow[];
   }
 
-  async readConfig(owner: string, repoName: string): Promise<IqpagesConfig | null> {
-    const content = await this.readFileFromLatest(owner, repoName, IQPAGES_CONSTANTS.CONFIG_FILENAME);
-    if (!content) return null;
-    try {
-      return JSON.parse(content);
-    } catch {
-      return null;
-    }
+  async isDeployed(owner: string, repo: string): Promise<boolean> {
+    const all = await this.listAll();
+    const id = buildId(owner, repo);
+    return all.some((r) => r.id === id);
   }
 
-  async readProfile(owner: string, repoName: string): Promise<IqprofileConfig | null> {
-    const content = await this.readFileFromLatest(owner, repoName, IQPAGES_CONSTANTS.PROFILE_FILENAME);
-    if (!content) return null;
-    try {
-      return JSON.parse(content);
-    } catch {
-      return null;
-    }
+  /** Read iqpages.json from the repo's latest git commit. Returns null when
+   *  the repo has no commits or the file is absent. */
+  async readConfig(owner: string, repo: string): Promise<IqpagesConfig | null> {
+    return this.readJsonFromLatest<IqpagesConfig>(owner, repo, IQPAGES_CONSTANTS.CONFIG_FILENAME);
   }
 
-  async deploy(repoName: string): Promise<string> {
-    const publicKey = this.wallet.publicKey;
+  async readProfile(owner: string, repo: string): Promise<IqprofileConfig | null> {
+    return this.readJsonFromLatest<IqprofileConfig>(owner, repo, IQPAGES_CONSTANTS.PROFILE_FILENAME);
+  }
+
+  private async readJsonFromLatest<T>(
+    owner: string,
+    repo: string,
+    filename: string,
+  ): Promise<T | null> {
+    const latest = await readLatestCommit(owner, repo);
+    if (!latest) return null;
+    const tree = await loadTree(latest.treeTxId);
+    const entry = tree[filename];
+    if (!entry?.txId) return null;
+    const base64 = await loadBlob(entry.txId);
+    return JSON.parse(Buffer.from(base64, "base64").toString("utf8")) as T;
+  }
+
+  /** Register the repo in the gallery. One-shot — second call throws. */
+  async deploy(repo: string): Promise<string> {
+    const { publicKey } = this.wallet;
     if (!publicKey) throw new Error("Wallet not connected");
     const owner = publicKey.toBase58();
 
-    // Only public repos — see the Node service for rationale.
-    const repos = await this.git.listRepos(owner);
-    const repo = repos.find((r) => r.name === repoName);
-    if (!repo) throw new Error(`repo not found: ${owner}/${repoName}`);
-    if (!repo.isPublic) {
+    if (await this.isDeployed(owner, repo)) {
+      throw new Error(`already deployed: ${owner}/${repo}`);
+    }
+
+    // Sanity-check that iqpages.json actually lives in the repo before we
+    // charge anyone — keeps the gallery from filling up with broken links.
+    const config = await this.readConfig(owner, repo);
+    if (!config) {
       throw new Error(
-        `repo '${repoName}' is private. Only public repos can be deployed as IQ Pages.`,
+        `${IQPAGES_CONSTANTS.CONFIG_FILENAME} missing in ${repo}. Commit it first, then deploy.`,
       );
     }
-
-    const config = await this.readConfig(owner, repoName);
-    if (!config) {
-      throw new Error(`${IQPAGES_CONSTANTS.CONFIG_FILENAME} missing in repo '${repoName}'. Commit it first.`);
-    }
     validateIqpagesConfig(config);
-
-    const profile = await this.readProfile(owner, repoName);
-    if (profile) validateIqprofileConfig(profile);
-
-    if (await this.isDeployed(owner, repoName)) {
-      throw new Error(`already deployed: ${owner}/${repoName}`);
-    }
 
     const balance = await this.connection.getBalance(publicKey);
     const needed = IQPAGES_CONSTANTS.FEE_LAMPORTS + 50_000_000;
@@ -202,26 +197,21 @@ export class IqpagesService {
       );
     }
 
-    // 1. Create marker table first (no fee spent on failure)
-    const seed = buildSeed(owner, repoName);
-    const sig = await iqlabs.writer.createTable(
+    const row: DeploymentRow = {
+      id: buildId(owner, repo),
+      owner,
+      repo,
+      deployedAt: Date.now(),
+    };
+    const sig = await iqlabs.writer.writeRow(
       this.connection,
-      this.signer as any,
+      this.signer,
       IQPAGES_CONSTANTS.ROOT_ID,
-      seed,
-      "iqpages",
-      ["marker"],
-      "marker",
-      [],
-      undefined,
-      [SystemProgram.programId],
-      seed,
+      IQPAGES_CONSTANTS.TABLE_HINT,
+      JSON.stringify(row),
     );
+    notifyGateway(tablePda().toBase58(), sig, row, owner);
 
-    // 2. Fee transfer after table creation succeeded. Wait for confirmation
-    // so the caller knows the 0.2 SOL actually settled before returning —
-    // otherwise a UI toast "Deployed!" could fire while the fee is still
-    // floating and potentially fail (blockhash expiry, network drop, etc.).
     const transferTx = new Transaction().add(
       SystemProgram.transfer({
         fromPubkey: publicKey,
@@ -235,11 +225,7 @@ export class IqpagesService {
     const signed = await this.wallet.signTransaction(transferTx);
     const feeSig = await this.connection.sendRawTransaction(signed.serialize());
     await this.connection.confirmTransaction(
-      {
-        signature: feeSig,
-        blockhash: latest.blockhash,
-        lastValidBlockHeight: latest.lastValidBlockHeight,
-      },
+      { signature: feeSig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
       "confirmed",
     );
 

@@ -1,17 +1,18 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+// useConnection still needed for IqpagesService construction below.
+import { useQuery } from "@tanstack/react-query";
+import { readLatestCommit } from "@/lib/gateway/reader";
 import { useMemo } from "react";
 import { IqpagesService } from "@/services/iqpages/iqpages-service";
-import { useGitService } from "@/hooks/useGitData";
 
 export function useIqpagesService() {
   const { connection } = useConnection();
   const wallet = useWallet();
   return useMemo(
-    () => new IqpagesService(connection, wallet as any),
-    [connection, wallet]
+    () => new IqpagesService(connection, wallet as never),
+    [connection, wallet],
   );
 }
 
@@ -54,17 +55,11 @@ export function useIqpagesDeployed(owner: string | undefined, repoName: string |
   });
 }
 
-/**
- * Latest commit's treeTxId for a repo — used to build the gateway /site URL.
- */
+/** Latest commit's treeTxId — used to build gateway / site URLs. */
 export function useLatestTreeTxId(owner: string | undefined, repoName: string | undefined) {
-  const git = useGitService();
   return useQuery({
     queryKey: ["git", "latestTree", owner, repoName],
-    queryFn: async () => {
-      const commits = await git.getLog(repoName!, owner);
-      return commits[0]?.treeTxId ?? null;
-    },
+    queryFn: async () => (await readLatestCommit(owner!, repoName!))?.treeTxId ?? null,
     staleTime: 60_000,
     enabled: !!owner && !!repoName,
   });

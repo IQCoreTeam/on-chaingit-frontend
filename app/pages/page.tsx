@@ -1,50 +1,41 @@
 "use client";
 
-import Link from "next/link";
-import { useMemo } from "react";
-import { useQueries } from "@tanstack/react-query";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { useIqpagesService, useIqpagesList } from "@/hooks/useIqpagesData";
-import { useGitService } from "@/hooks/useGitData";
+// iqpages gallery — light. Each card shows just what the deployment row
+// already gives us (owner + repo). Heavy metadata (iqpages.json /
+// iqprofile.json — those live in the repo's git tree and require
+// readLatestCommit + loadTree + loadBlob = many RPC calls per card) is
+// deferred to the detail page so RPC providers don't see a spike of N×K
+// requests when the list happens to have a few rows.
 
-const GATEWAY_SITE_BASE = "https://gateway.solanainternet.com/site";
+import { useIqpagesList } from "@/hooks/useIqpagesData";
+import { useOwnerRepos } from "@/hooks/useGitData";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { Globe, Plus } from "lucide-react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
+
+const PAGE_SIZE = 30;
 
 export default function PagesGallery() {
-  const svc = useIqpagesService();
-  const git = useGitService();
+  const wallet = useWallet();
+  const myAddr = wallet.publicKey?.toBase58();
   const { data: deployments, isLoading, error } = useIqpagesList();
 
-  const perCardQueries = useQueries({
-    queries: (deployments ?? []).flatMap((d) => [
-      {
-        queryKey: ["iqpages", "config", d.owner, d.repoName],
-        queryFn: () => svc.readConfig(d.owner, d.repoName),
-        staleTime: 5 * 60_000,
-      },
-      {
-        queryKey: ["iqpages", "profile", d.owner, d.repoName],
-        queryFn: () => svc.readProfile(d.owner, d.repoName),
-        staleTime: 5 * 60_000,
-      },
-      {
-        queryKey: ["git", "latestTree", d.owner, d.repoName],
-        queryFn: async () => {
-          const commits = await git.getLog(d.repoName, d.owner);
-          return commits[0]?.treeTxId ?? null;
-        },
-        staleTime: 60_000,
-      },
-    ]),
-  });
+  const [visible, setVisible] = useState(PAGE_SIZE);
+  const visibleDeployments = (deployments ?? []).slice(0, visible);
 
-  const cards = useMemo(() => {
-    return (deployments ?? []).map((d, i) => ({
-      ...d,
-      config: perCardQueries[i * 3]?.data as any,
-      profile: perCardQueries[i * 3 + 1]?.data as any,
-      treeTxId: perCardQueries[i * 3 + 2]?.data as string | null | undefined,
-    }));
-  }, [deployments, perCardQueries]);
+  // "Deploy from your repos" — connected wallet's public repos that aren't
+  // already in the deployments list.
+  const myReposQuery = useOwnerRepos(myAddr);
+  const deployedSet = useMemo(
+    () => new Set((deployments ?? []).filter((d) => d.owner === myAddr).map((d) => d.repo)),
+    [deployments, myAddr],
+  );
+  const undeployedRepos = useMemo(
+    () => (myReposQuery.data ?? []).filter((r) => r.isPublic && !deployedSet.has(r.name)),
+    [myReposQuery.data, deployedSet],
+  );
 
   return (
     <div className="min-h-screen bg-cyber-bg text-foreground font-sans relative overflow-x-hidden">
@@ -69,9 +60,11 @@ export default function PagesGallery() {
             <Link href="/pages" className="text-sm font-tech text-neon-pink hover:text-white px-4 py-2 hover:bg-neon-pink/10 transition-colors uppercase tracking-widest border border-neon-pink hidden md:block">
               Pages
             </Link>
-            <Link href="/profile" className="text-sm font-tech text-neon-cyan hover:text-white px-4 py-2 hover:bg-neon-cyan/10 transition-colors uppercase tracking-widest border border-transparent hover:border-neon-cyan hidden md:block">
-              My // Profile
-            </Link>
+            {myAddr && (
+              <Link href={`/${myAddr}`} className="text-sm font-tech text-neon-cyan hover:text-white px-4 py-2 hover:bg-neon-cyan/10 transition-colors uppercase tracking-widest border border-transparent hover:border-neon-cyan hidden md:block">
+                My // Repos
+              </Link>
+            )}
             <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
           </div>
         </div>
@@ -87,60 +80,86 @@ export default function PagesGallery() {
           </p>
         </div>
 
-        {isLoading && (
-          <div className="text-neon-cyan font-mono">Loading deployments…</div>
-        )}
-
+        {isLoading && <div className="text-neon-cyan font-mono">Loading deployments…</div>}
         {error && (
           <div className="text-red-400 font-mono">
             Failed to load: {(error as Error).message}
           </div>
         )}
 
-        {!isLoading && cards.length === 0 && (
+        {myAddr && undeployedRepos.length > 0 && (
+          <section className="mb-10 cyber-card p-6 border-neon-pink/40 bg-black/40">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 border border-neon-pink bg-neon-pink/10 flex items-center justify-center text-neon-pink">
+                <Plus size={18} />
+              </div>
+              <div>
+                <h2 className="text-lg font-cyber uppercase tracking-widest text-neon-pink">
+                  Deploy from your repos
+                </h2>
+                <p className="text-xs text-white/50 font-mono">
+                  Public repos owned by you that aren't deployed yet — pick one to configure & deploy.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {undeployedRepos.map((r) => (
+                <Link
+                  key={r.name}
+                  href={`/${myAddr}/${r.name}/pages-setup`}
+                  className="flex items-center justify-between gap-3 px-4 py-3 border border-cyber-border hover:border-neon-pink hover:bg-neon-pink/5 transition-colors font-mono text-sm"
+                >
+                  <span className="font-cyber uppercase text-white truncate">{r.name}</span>
+                  <span className="text-[10px] text-neon-pink font-tech tracking-wider">DEPLOY →</span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {!isLoading && visibleDeployments.length === 0 && (
           <div className="border border-cyber-border bg-cyber-panel/50 p-8 text-center text-neon-cyan/70 font-mono">
             No pages deployed yet.
           </div>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {cards.map((c) => (
+          {visibleDeployments.map((d) => (
             <Link
-              key={`${c.owner}/${c.repoName}`}
-              href={`/pages/${c.owner}/${c.repoName}`}
+              key={`${d.owner}/${d.repo}`}
+              href={`/pages/${d.owner}/${d.repo}`}
               className="border border-cyber-border bg-cyber-panel/50 hover:border-neon-pink hover:shadow-[0_0_15px_rgba(255,0,255,0.3)] transition-all p-5 flex flex-col gap-2"
             >
               <div className="flex items-center gap-3">
-                {c.profile?.icon && c.treeTxId ? (
-                  <img
-                    src={`${GATEWAY_SITE_BASE}/${c.treeTxId}/${c.profile.icon.replace(/^\.\//, "")}`}
-                    alt=""
-                    className="w-10 h-10 border border-neon-cyan/40 object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                ) : (
-                  <div className="w-10 h-10 border border-neon-cyan/40 bg-neon-cyan/5" />
-                )}
+                <div className="w-10 h-10 border border-neon-cyan/40 bg-neon-cyan/5 flex items-center justify-center text-neon-cyan">
+                  <Globe size={18} />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-cyber uppercase tracking-wide text-white truncate">
-                    {c.profile?.displayName || c.config?.name || c.repoName}
+                    {d.repo}
                   </div>
                   <div className="text-xs text-neon-cyan/60 font-mono truncate">
-                    {c.owner.slice(0, 4)}…{c.owner.slice(-4)} / {c.repoName}
+                    {d.owner.slice(0, 4)}…{d.owner.slice(-4)}
                   </div>
                 </div>
               </div>
-              <p className="text-sm text-neon-cyan/80 font-mono line-clamp-3 mt-1">
-                {c.profile?.description || c.config?.description || "—"}
-              </p>
-              {c.config?.version && (
-                <div className="text-[10px] text-neon-pink font-mono uppercase mt-auto">
-                  v{c.config.version}
-                </div>
-              )}
+              <div className="text-[10px] text-neon-pink font-mono uppercase mt-auto">
+                {new Date(d.deployedAt).toLocaleDateString()}
+              </div>
             </Link>
           ))}
         </div>
+
+        {(deployments?.length ?? 0) > visible && (
+          <div className="mt-6 text-center">
+            <button
+              onClick={() => setVisible((v) => v + PAGE_SIZE)}
+              className="px-6 py-2 border border-cyber-border text-neon-cyan/70 hover:text-neon-cyan hover:border-neon-cyan font-tech uppercase text-xs tracking-widest transition-all"
+            >
+              Load_More ({Math.min(PAGE_SIZE, (deployments?.length ?? 0) - visible)})
+            </button>
+          </div>
+        )}
       </main>
     </div>
   );

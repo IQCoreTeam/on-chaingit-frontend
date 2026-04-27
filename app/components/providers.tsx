@@ -2,7 +2,7 @@
 
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { clusterApiUrl } from "@solana/web3.js";
+import iqlabs from "iqlabs-sdk";
 import { useMemo } from "react";
 import QueryProvider from "@/providers/QueryProvider";
 
@@ -15,9 +15,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
   const endpoint = useMemo(
     () =>
       process.env.NEXT_PUBLIC_RPC_ENDPOINT ||
-      "https://mainnet.helius-rpc.com/?api-key=767cde04-93dd-4e62-9580-978c74febc93",
+      process.env.NEXT_PUBLIC_SOLANA_RPC_ENDPOINT ||
+      "https://api.mainnet-beta.solana.com",
     [],
   );
+
+  // iqlabs-sdk's reader path uses its own internal `getConnection()` that
+  // ignores wallet-adapter's ConnectionProvider. Push our endpoint into that
+  // singleton so reads (readTableRows / readCodeIn) hit the same RPC.
+  iqlabs.setRpcUrl(endpoint);
 
   // Wallets are implicitly detected by the Wallet Standard
   const wallets = useMemo(() => [], []);

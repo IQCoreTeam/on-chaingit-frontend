@@ -2,28 +2,38 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useParams } from "next/navigation";
+import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { toast } from "sonner";
-import { GitChainService } from "@/services/git/git-chain-service";
+import { useGitClient, useFileTree, useCommits, useInvalidateRepo } from "@/hooks/useGitData";
+import { useIqpagesConfig, useIqpagesProfile, useIqpagesService } from "@/hooks/useIqpagesData";
+import { loadBlob } from "@iqlabs-official/git-sdk/browser";
 import {
-  IQPAGES_TEMPLATE,
-  IQPROFILE_TEMPLATE,
+  IQPAGES_CONSTANTS,
   validateIqpagesConfig,
   validateIqprofileConfig,
 } from "@/services/iqpages/iqpages-service";
-import { useIqpagesConfig, useIqpagesProfile } from "@/hooks/useIqpagesData";
+
+function encodeBase64Text(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
 
 export default function PagesSetup() {
   const params = useParams<{ wallet: string; repo: string }>();
-  const router = useRouter();
   const walletAdapter = useWallet();
-  const { connection } = useConnection();
-
   const owner = params?.wallet;
   const repoName = params?.repo;
   const isOwner = walletAdapter.publicKey?.toBase58() === owner;
+  const client = useGitClient();
+  const iqpagesSvc = useIqpagesService();
+  const invalidate = useInvalidateRepo();
+  const { data: commits } = useCommits(owner, repoName);
+  const headTreeId = commits?.[0]?.treeTxId;
+  const { data: tree } = useFileTree(headTreeId);
 
   const { data: existingConfig } = useIqpagesConfig(owner, repoName);
   const { data: existingProfile } = useIqpagesProfile(owner, repoName);
@@ -35,22 +45,44 @@ export default function PagesSetup() {
   const [iqprofileError, setIqprofileError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  // Prefilled-from-chain configs start locked so a stray click can't
+  // overwrite them. The user explicitly hits "Edit" to enable the textarea;
+  // "Cancel" reverts to the on-chain value.
+  const [iqpagesLocked, setIqpagesLocked] = useState(false);
+  const [iqprofileLocked, setIqprofileLocked] = useState(false);
 
-  // Prefill once on first existingConfig/profile load
+  // Prefill only when a config already exists in the repo's commit. When it
+  // doesn't, leave the textarea empty so the placeholder template is visible
+  // — the user fills it (or pastes their own) before committing.
   useEffect(() => {
     if (initialized) return;
     if (existingConfig === undefined) return; // still loading
-    setIqpagesJson(
-      existingConfig ? JSON.stringify(existingConfig, null, 2) : IQPAGES_TEMPLATE,
-    );
+    if (existingConfig) {
+      setIqpagesJson(JSON.stringify(existingConfig, null, 2));
+      setIqpagesLocked(true);
+    }
     if (existingProfile) {
       setIqprofileJson(JSON.stringify(existingProfile, null, 2));
       setIncludeProfile(true);
-    } else {
-      setIqprofileJson(IQPROFILE_TEMPLATE);
+      setIqprofileLocked(true);
     }
     setInitialized(true);
   }, [existingConfig, existingProfile, initialized]);
+
+  function unlockIqpages() {
+    setIqpagesLocked(false);
+  }
+  function cancelIqpagesEdit() {
+    if (existingConfig) setIqpagesJson(JSON.stringify(existingConfig, null, 2));
+    setIqpagesLocked(true);
+  }
+  function unlockIqprofile() {
+    setIqprofileLocked(false);
+  }
+  function cancelIqprofileEdit() {
+    if (existingProfile) setIqprofileJson(JSON.stringify(existingProfile, null, 2));
+    setIqprofileLocked(true);
+  }
 
   useEffect(() => {
     if (!iqpagesJson) return;
@@ -82,19 +114,78 @@ export default function PagesSetup() {
       toast.error("Fix validation errors first.");
       return;
     }
+    if (!client) {
+      toast.error("Wallet not connected");
+      return;
+    }
 
     setCommitting(true);
     try {
-      // TODO(iqpages): current GitChainService.commit reads files from
-      // process.cwd() which does not exist in browser. This path is a
-      // placeholder until browser-side commit-with-content is wired up.
-      toast.message("Commit-from-browser is not yet wired up. See TODO in page.", {
-        description: "For now, commit iqpages.json/iqprofile.json locally via iq-git-cli.",
-      });
-      console.log("Would commit:", {
-        iqpagesJson,
-        iqprofileJson: includeProfile ? iqprofileJson : null,
-      });
+      // Build the next commit's scan map: every existing blob carried over
+      // unchanged + iqpages.json (and optionally iqprofile.json) overwritten.
+      const scan: Record<string, string> = {};
+      if (tree) {
+        for (const [path, entry] of Object.entries(tree)) {
+          if (path === IQPAGES_CONSTANTS.CONFIG_FILENAME) continue;
+          if (path === IQPAGES_CONSTANTS.PROFILE_FILENAME && includeProfile) continue;
+          scan[path] = await loadBlob(entry.txId);
+        }
+      }
+      scan[IQPAGES_CONSTANTS.CONFIG_FILENAME] = encodeBase64Text(iqpagesJson);
+      if (includeProfile) {
+        scan[IQPAGES_CONSTANTS.PROFILE_FILENAME] = encodeBase64Text(iqprofileJson);
+      }
+
+      const commit = await client.commit(repoName, "iqpages config update", scan);
+      invalidate(owner, repoName);
+      // Re-lock so the next click is "Deploy", not "another commit". The
+      // refetch from invalidate() will pull the new existingConfig and the
+      // textareas already mirror it.
+      setIqpagesLocked(true);
+      if (includeProfile) setIqprofileLocked(true);
+      toast.success(`Committed ${commit.id.slice(0, 8)}…`);
+    } catch (e) {
+      console.warn("Pages config commit failed", e);
+      toast.error("Commit failed: " + (e instanceof Error ? e.message : String(e)));
+      throw e;
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  async function handleDeploy() {
+    if (!owner || !repoName || !isOwner) return;
+
+    // Deploy reads iqpages.json from the latest commit. If the file isn't in
+    // that commit yet, the deploy will fail with a confusing on-chain error
+    // — surface it before sending any tx.
+    if (!existingConfig) {
+      toast.error(
+        "iqpages.json isn't in this repo yet. Fill it in above and click 'Commit to repo' first.",
+        { duration: 6000 },
+      );
+      return;
+    }
+
+    // The user typed changes into the (unlocked) textarea but never committed
+    // them. Deploying now would pin the *previous* commit, which is almost
+    // certainly not what they want.
+    if (!iqpagesLocked || (includeProfile && !iqprofileLocked)) {
+      toast.error(
+        "You have uncommitted edits. Click 'Commit to repo' first, then Deploy.",
+        { duration: 6000 },
+      );
+      return;
+    }
+
+    setCommitting(true);
+    try {
+      const sig = await iqpagesSvc.deploy(repoName);
+      toast.success(`Deployed: ${sig.slice(0, 12)}…`);
+    } catch (e) {
+      console.warn("Deploy failed", e);
+      toast.error(e instanceof Error ? e.message : "Deploy failed");
+      throw e;
     } finally {
       setCommitting(false);
     }
@@ -132,13 +223,34 @@ export default function PagesSetup() {
         )}
 
         <section className="mb-8">
-          <h2 className="text-lg font-cyber uppercase tracking-widest text-neon-cyan mb-3">
-            iqpages.json (required)
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-cyber uppercase tracking-widest text-neon-cyan">
+              iqpages.json (required)
+            </h2>
+            {existingConfig && (
+              iqpagesLocked ? (
+                <button
+                  onClick={unlockIqpages}
+                  className="text-xs font-tech uppercase tracking-widest text-neon-pink border border-neon-pink/50 px-3 py-1 hover:bg-neon-pink/10"
+                >
+                  Edit
+                </button>
+              ) : (
+                <button
+                  onClick={cancelIqpagesEdit}
+                  className="text-xs font-tech uppercase tracking-widest text-white/60 border border-cyber-border px-3 py-1 hover:border-white/40"
+                >
+                  Cancel edit
+                </button>
+              )
+            )}
+          </div>
           <textarea
             value={iqpagesJson}
             onChange={(e) => setIqpagesJson(e.target.value)}
-            className="w-full h-48 bg-black border border-cyber-border p-3 font-mono text-sm text-white focus:outline-none focus:border-neon-cyan"
+            readOnly={iqpagesLocked}
+            placeholder={`{\n  "name": "${repoName ?? "my-app"}",\n  "version": "1.0.0",\n  "description": "Short description",\n  "entry": "index.html"\n}`}
+            className={`w-full h-48 bg-black border p-3 font-mono text-sm placeholder-white/30 focus:outline-none ${iqpagesLocked ? "border-cyber-border text-white/60 cursor-not-allowed" : "border-cyber-border text-white focus:border-neon-cyan"}`}
             spellCheck={false}
           />
           {iqpagesError && (
@@ -157,10 +269,31 @@ export default function PagesSetup() {
           </label>
           {includeProfile && (
             <>
+              {existingProfile && (
+                <div className="flex justify-end mb-2">
+                  {iqprofileLocked ? (
+                    <button
+                      onClick={unlockIqprofile}
+                      className="text-xs font-tech uppercase tracking-widest text-neon-pink border border-neon-pink/50 px-3 py-1 hover:bg-neon-pink/10"
+                    >
+                      Edit
+                    </button>
+                  ) : (
+                    <button
+                      onClick={cancelIqprofileEdit}
+                      className="text-xs font-tech uppercase tracking-widest text-white/60 border border-cyber-border px-3 py-1 hover:border-white/40"
+                    >
+                      Cancel edit
+                    </button>
+                  )}
+                </div>
+              )}
               <textarea
                 value={iqprofileJson}
                 onChange={(e) => setIqprofileJson(e.target.value)}
-                className="w-full h-56 bg-black border border-cyber-border p-3 font-mono text-sm text-white focus:outline-none focus:border-neon-cyan"
+                readOnly={iqprofileLocked}
+                placeholder={`{\n  "displayName": "${repoName ?? "My App"}",\n  "description": "Short description",\n  "icon": "./icon.png",\n  "routes": {\n    "profile": "/?profile={walletAddress}"\n  }\n}`}
+                className={`w-full h-56 bg-black border p-3 font-mono text-sm placeholder-white/30 focus:outline-none ${iqprofileLocked ? "border-cyber-border text-white/60 cursor-not-allowed" : "border-cyber-border text-white focus:border-neon-cyan"}`}
                 spellCheck={false}
               />
               {iqprofileError && (
@@ -177,11 +310,20 @@ export default function PagesSetup() {
               !isOwner ||
               committing ||
               !!iqpagesError ||
-              (includeProfile && !!iqprofileError)
+              (includeProfile && !!iqprofileError) ||
+              // Nothing was actually edited — commit would be a no-op.
+              (iqpagesLocked && (!includeProfile || iqprofileLocked))
             }
             className="py-3 px-6 cyber-button-primary disabled:opacity-40"
           >
-            {committing ? "Committing…" : "Commit to repo"}
+            {committing ? "Working…" : "Commit to repo"}
+          </button>
+          <button
+            onClick={handleDeploy}
+            disabled={!isOwner || committing}
+            className="py-3 px-6 border border-neon-green text-neon-green font-tech uppercase tracking-widest hover:bg-neon-green/10 disabled:opacity-40"
+          >
+            Deploy
           </button>
           <Link
             href={`/${owner}/${repoName}`}
