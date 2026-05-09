@@ -402,7 +402,7 @@ export default function RepoDetail() {
                         <>
                           {selectedTxId && (
                             <a
-                              href={`https://solscan.io/tx/${selectedTxId}`}
+                              href={`https://solscan.io/tx/${selectedTxId}?cluster=devnet`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-2 px-4 py-1 border border-neon-cyan text-neon-cyan hover:bg-neon-cyan/10 font-tech text-xs uppercase tracking-wider transition-colors"

@@ -26,9 +26,9 @@ import {
   repoListHint,
 } from "@iqlabs-official/git-sdk";
 
-const PRIMARY_GATEWAY = "https://gateway.solanainternet.com";
-const BACKUP_GATEWAY = "https://gateway.iqlabs.dev";
-const GATEWAYS = [PRIMARY_GATEWAY, BACKUP_GATEWAY];
+const PRIMARY_GATEWAY = "https://dev-gateway.iqlabs.dev";
+const BACKUP_GATEWAY = "https://dev-gateway.iqlabs.dev";
+const GATEWAYS = [PRIMARY_GATEWAY];
 const GATEWAY_OVERRIDE_KEY = "iqgit_gateway";
 
 function getGateways(): string[] {

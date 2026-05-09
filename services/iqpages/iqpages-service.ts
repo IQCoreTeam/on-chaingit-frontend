@@ -125,7 +125,7 @@ export class IqpagesService {
   async listAll(): Promise<DeploymentRow[]> {
     const pda = tablePda();
     try {
-      const url = `https://gateway.solanainternet.com/table/${pda.toBase58()}/rows`;
+      const url = `https://dev-gateway.iqlabs.dev/table/${pda.toBase58()}/rows`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();

@@ -10,7 +10,7 @@ import {
   useLatestTreeTxId,
 } from "@/hooks/useIqpagesData";
 
-const GATEWAY_SITE_BASE = "https://gateway.solanainternet.com/site";
+const GATEWAY_SITE_BASE = "https://dev-gateway.iqlabs.dev/site";
 
 function openWithDyor(owner: string, repoName: string, url: string) {
   const key = `dyor-ack-${owner}/${repoName}`;
