@@ -16,7 +16,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     () =>
       process.env.NEXT_PUBLIC_RPC_ENDPOINT ||
       process.env.NEXT_PUBLIC_SOLANA_RPC_ENDPOINT ||
-      "https://api.mainnet-beta.solana.com",
+      "https://mainnet.helius-rpc.com/?api-key=767cde04-93dd-4e62-9580-978c74febc93",
     [],
   );
 
