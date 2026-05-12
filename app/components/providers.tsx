@@ -12,11 +12,11 @@ import "@solana/wallet-adapter-react-ui/styles.css";
 import { Toaster } from 'sonner';
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  // GHCR images never carry env (.dockerignore strips .env*), and the SDK's
+  // own fallback is api.mainnet-beta — so pin the RPC here on the devnet
+  // branch instead of relying on env that won't be present at build/runtime.
   const endpoint = useMemo(
-    () =>
-      process.env.NEXT_PUBLIC_RPC_ENDPOINT ||
-      process.env.NEXT_PUBLIC_SOLANA_RPC_ENDPOINT ||
-      "https://devnet.helius-rpc.com/?api-key=fbb113ce-eeb4-4277-8c44-7153632d175a",
+    () => "https://devnet.helius-rpc.com/?api-key=fbb113ce-eeb4-4277-8c44-7153632d175a",
     [],
   );
 
