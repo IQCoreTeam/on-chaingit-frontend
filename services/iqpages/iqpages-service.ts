@@ -18,12 +18,18 @@ import {
 } from "@solana/web3.js";
 import iqlabs from "iqlabs-sdk";
 import type { SignerInput } from "iqlabs-sdk/utils";
+// Pins the branch RPC into the SDK at module load — the deploy/commit path
+// here goes through iqlabs-sdk + git-sdk's GitClient, neither of which use
+// wallet-adapter's connection, so without this they'd hit api.mainnet-beta.
+import { setSdkRpc } from "@/lib/rpc";
 import {
   loadBlob,
   loadTree,
   notifyGateway,
   readLatestCommit,
 } from "@/lib/gateway/reader";
+
+setSdkRpc();
 
 export interface IqpagesConfig {
   name: string;
