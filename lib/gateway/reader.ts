@@ -5,9 +5,6 @@
 
 import { PublicKey } from "@solana/web3.js";
 import iqlabs from "iqlabs-sdk";
-// Importing this pins the branch RPC into the SDK at module load — before any
-// reader below runs, and on the server too (where Providers never renders).
-import "@/lib/rpc";
 import {
   loadBlob as sdkLoadBlob,
   loadTree as sdkLoadTree,
