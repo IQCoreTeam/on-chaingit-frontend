@@ -24,6 +24,7 @@ import {
   notifyGateway,
   readLatestCommit,
 } from "@/lib/gateway/reader";
+import { NETWORK } from "@/lib/network";
 
 export interface IqpagesConfig {
   name: string;
@@ -125,7 +126,7 @@ export class IqpagesService {
   async listAll(): Promise<DeploymentRow[]> {
     const pda = tablePda();
     try {
-      const url = `https://gateway.solanainternet.com/table/${pda.toBase58()}/rows`;
+      const url = `${NETWORK.gateways[0]}/table/${pda.toBase58()}/rows`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
