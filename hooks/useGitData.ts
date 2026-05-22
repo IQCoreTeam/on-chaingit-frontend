@@ -7,13 +7,17 @@
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitClient } from "@iqlabs-official/git-sdk/browser";
+import { PublicKey } from "@solana/web3.js";
 import {
   loadBlob,
   loadTree,
   notifyGateway,
   readCommitHistory,
+  readCommitHistoryByPda,
   readOwnerRepos,
   readRegistryPage,
+  fetchSnsResolution,
+  fetchTableMeta,
 } from "@/lib/gateway/reader";
 import { useMemo } from "react";
 
@@ -62,6 +66,60 @@ export function useCommits(owner: string | undefined, repoName: string | undefin
     queryFn: () => readCommitHistory(owner!, repoName!),
     staleTime: 30_000,
     enabled: !!owner && !!repoName,
+  });
+}
+
+/** Commits keyed by the commit-table PDA — for .sol / PDA entry where we don't
+ *  have owner/repo. Same Commit[] shape as useCommits. */
+export function useCommitsByPda(pda: PublicKey | undefined) {
+  return useQuery({
+    queryKey: ["commits", "pda", pda?.toBase58()],
+    queryFn: () => readCommitHistoryByPda(pda!),
+    staleTime: 30_000,
+    enabled: !!pda,
+  });
+}
+
+const PUBKEY_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** What a /[ident] segment resolves to. */
+export type GitEntry =
+  | { kind: "repo"; pda: PublicKey; owner: string; repo: string }
+  | { kind: "owner"; owner: string }
+  | { kind: "invalid" };
+
+// Resolve a raw pubkey: a commit-table PDA (its meta name is git_commits:O:R)
+// renders one repo; anything else is treated as an owner wallet. The gateway
+// caches both the hit and the miss, so this is cheap on repeat.
+async function resolvePubkey(p: string): Promise<GitEntry> {
+  const meta = await fetchTableMeta(p);
+  const name = meta?.name ?? "";
+  if (name.startsWith("git_commits:")) {
+    const [, owner, repo] = name.split(":");
+    return { kind: "repo", pda: new PublicKey(p), owner, repo };
+  }
+  return { kind: "owner", owner: p };
+}
+
+async function resolveEntry(ident: string): Promise<GitEntry> {
+  const s = ident.trim();
+  if (s.toLowerCase().endsWith(".sol")) {
+    const { owner, record } = await fetchSnsResolution(s);
+    const target = record ?? owner;
+    return target ? resolvePubkey(target) : { kind: "invalid" };
+  }
+  if (PUBKEY_RE.test(s)) return resolvePubkey(s);
+  return { kind: "invalid" };
+}
+
+/** Dispatch a /[ident] segment (a .sol domain, a commit-table PDA, or an owner
+ *  wallet) to a repo view or an owner repo list. */
+export function useGitEntry(ident: string | undefined) {
+  return useQuery<GitEntry>({
+    queryKey: ["git-entry", ident],
+    queryFn: () => resolveEntry(ident!),
+    staleTime: 5 * 60_000,
+    enabled: !!ident,
   });
 }
 

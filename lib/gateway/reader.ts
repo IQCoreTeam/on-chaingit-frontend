@@ -9,7 +9,6 @@ import {
   loadBlob as sdkLoadBlob,
   loadTree as sdkLoadTree,
   readCommitHistory as sdkReadCommitHistory,
-  readLatestCommit as sdkReadLatestCommit,
   readOwnerRepos as sdkReadOwnerRepos,
   readRegistryPage as sdkReadRegistryPage,
 } from "@iqlabs-official/git-sdk/browser";
@@ -22,21 +21,19 @@ import type {
 import {
   IQGIT_ROOT_ID,
   REGISTRY_HINT,
-  commitTableHint,
+  commitTablePda,
   repoListHint,
 } from "@iqlabs-official/git-sdk";
+import { NETWORK } from "@/lib/network";
 
-const PRIMARY_GATEWAY = "https://dev-gateway.iqlabs.dev";
-const BACKUP_GATEWAY = "https://dev-gateway.iqlabs.dev";
-const GATEWAYS = [PRIMARY_GATEWAY];
 const GATEWAY_OVERRIDE_KEY = "iqgit_gateway";
 
 function getGateways(): string[] {
   if (typeof window !== "undefined") {
     const custom = window.localStorage.getItem(GATEWAY_OVERRIDE_KEY);
-    if (custom) return [custom, ...GATEWAYS];
+    if (custom) return [custom, ...NETWORK.gateways];
   }
-  return GATEWAYS;
+  return NETWORK.gateways;
 }
 
 async function gwFetch(path: string): Promise<Response> {
@@ -52,7 +49,10 @@ async function gwFetch(path: string): Promise<Response> {
 }
 
 // ---------------------------------------------------------------
-// PDA derivation (mirrors @iqlabs-official/git-sdk's chain layer)
+// PDA derivation. The commit-table PDA comes straight from the SDK
+// (commitTablePda). registry / repo-list still derive locally because the SDK
+// only exposes their hints, not a PDA helper — small duplication of the SDK's
+// chain layer, kept until the SDK exposes those too.
 // ---------------------------------------------------------------
 const PROGRAM_ID = new PublicKey(iqlabs.contract.DEFAULT_ANCHOR_PROGRAM_ID);
 const DB_ROOT_SEED = iqlabs.utils.toSeedBytes(IQGIT_ROOT_ID);
@@ -68,9 +68,7 @@ export function pdaForRegistry(): PublicKey {
 export function pdaForOwnerRepos(owner: string): PublicKey {
   return tablePdaFromHint(repoListHint(owner));
 }
-export function pdaForCommitTable(owner: string, repo: string): PublicKey {
-  return tablePdaFromHint(commitTableHint(owner, repo));
-}
+export const pdaForCommitTable = commitTablePda;
 
 // ---------------------------------------------------------------
 // Reads — gateway first, SDK fallback
@@ -109,19 +107,23 @@ export function readOwnerRepos(owner: string): Promise<Repository[]> {
   );
 }
 
-export function readCommitHistory(
-  owner: string,
-  repo: string,
-  opts?: RowsOpts,
-): Promise<Commit[]> {
-  return readTableRowsGW<Commit>(pdaForCommitTable(owner, repo), opts, () =>
-    sdkReadCommitHistory(undefined as never, owner, repo, opts),
-  );
+// Commit history keyed by the commit-table PDA. owner/repo callers derive the
+// PDA with pdaForCommitTable; a .sol / dbroot caller passes its PDA straight in.
+export function readCommitHistoryByPda(pda: PublicKey, opts?: RowsOpts): Promise<Commit[]> {
+  return readTableRowsGW<Commit>(pda, opts, () => sdkReadCommitHistory(pda, opts));
+}
+
+export function readCommitHistory(owner: string, repo: string, opts?: RowsOpts): Promise<Commit[]> {
+  return readCommitHistoryByPda(pdaForCommitTable(owner, repo), opts);
+}
+
+export async function readLatestCommitByPda(pda: PublicKey): Promise<Commit | null> {
+  const rows = await readCommitHistoryByPda(pda, { limit: 1 });
+  return rows[0] ?? null;
 }
 
 export async function readLatestCommit(owner: string, repo: string): Promise<Commit | null> {
-  const rows = await readCommitHistory(owner, repo, { limit: 1 });
-  return rows[0] ?? null;
+  return readLatestCommitByPda(pdaForCommitTable(owner, repo));
 }
 
 async function readCodeInGW(sig: string): Promise<{ data: string | null; metadata: string }> {
@@ -175,4 +177,32 @@ export function notifyGateway(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ txSignature, row, signer }),
   }).catch(() => {});
+}
+
+// ---------------------------------------------------------------
+// Entry resolution (.sol + "is this pubkey a table?") — used by the /[ident]
+// page to dispatch a domain / commit-table PDA / owner wallet.
+// Small overlap with iq-wide-web's resolver: both just call the same gateway
+// endpoints. The dispatch logic itself isn't shared (different apps).
+// ---------------------------------------------------------------
+
+/** Resolve a .sol domain to {owner, record} via the gateway. */
+export async function fetchSnsResolution(
+  domain: string,
+): Promise<{ owner: string | null; record: string | null }> {
+  const res = await gwFetch(`/sns/${domain}`);
+  const data = await res.json();
+  return { owner: data.owner ?? null, record: data.record ?? null };
+}
+
+/** Table meta for a pubkey, or null when it isn't a table (404). `name` is the
+ *  table hint, e.g. "git_commits:<owner>:<repo>". Lets a caller tell a
+ *  commit-table PDA from a wallet without a heavy scan (gateway caches both). */
+export async function fetchTableMeta(
+  pubkey: string,
+): Promise<{ name: string; columns: string[] } | null> {
+  const gw = getGateways()[0];
+  const res = await fetch(`${gw}/table/${pubkey}/meta`);
+  if (!res.ok) return null;
+  return res.json();
 }
