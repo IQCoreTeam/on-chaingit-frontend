@@ -40,3 +40,55 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # main branch → redeploy the prod container (on-chaingit) only.
+  deploy-prod:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      # authorized_keys is command-restricted to `deploy.sh on-chaingit`,
+      # so this key can only redeploy the prod container even if leaked.
+      - name: Deploy prod to iqlabs server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_HOST_KEY: ${{ secrets.SSH_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s %s\n' "$DEPLOY_HOST" "$SSH_HOST_KEY" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              iqlabs@"$DEPLOY_HOST" 'ignored: forced command runs deploy.sh on-chaingit'
+          shred -u ~/.ssh/deploy_key 2>/dev/null || rm -f ~/.ssh/deploy_key
+
+  # devnet branch → redeploy the dev container (on-chaingit-dev) only.
+  deploy-dev:
+    needs: build
+    if: github.ref == 'refs/heads/devnet'
+    runs-on: ubuntu-latest
+    steps:
+      # authorized_keys is command-restricted to `deploy.sh on-chaingit-dev`,
+      # so this key can only redeploy the dev container even if leaked.
+      - name: Deploy dev to iqlabs server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY_DEV: ${{ secrets.DEPLOY_SSH_KEY_DEV }}
+          SSH_HOST_KEY: ${{ secrets.SSH_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY_DEV" > ~/.ssh/deploy_key
+          printf '%s %s\n' "$DEPLOY_HOST" "$SSH_HOST_KEY" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              iqlabs@"$DEPLOY_HOST" 'ignored: forced command runs deploy.sh on-chaingit-dev'
+          shred -u ~/.ssh/deploy_key 2>/dev/null || rm -f ~/.ssh/deploy_key
