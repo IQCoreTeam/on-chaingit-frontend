@@ -29,8 +29,8 @@ const HELIUS_KEY = "fbb113ce-eeb4-4277-8c44-7153632d175a";
 const CONFIGS: Record<Cluster, NetworkConfig> = {
   mainnet: {
     rpcEndpoint: `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`,
-    gateways: ["https://gateway.solanainternet.com", "https://gateway.iqlabs.dev"],
-    gatewaySiteBase: "https://gateway.solanainternet.com/site",
+    gateways: ["https://gateway.iqlabs.dev"],
+    gatewaySiteBase: "https://gateway.iqlabs.dev/site",
     solscanQuery: "",
   },
   devnet: {
