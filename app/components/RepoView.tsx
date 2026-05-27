@@ -36,6 +36,7 @@ import {
 } from "@/app/components/Skeleton";
 import { useFileTree, useFileContent } from "@/hooks/useGitData";
 import { NETWORK } from "@/lib/network";
+import { pdaForCommitTable } from "@/lib/gateway/reader";
 import type { GitClient } from "@iqlabs-official/git-sdk/browser";
 import type { Commit, FileTree } from "@iqlabs-official/git-sdk";
 
@@ -140,6 +141,17 @@ export function RepoView({
 }: RepoViewProps) {
   const headCommit = commits[0];
   const ownerAddress = owner ?? headCommit?.author ?? "";
+  // The commit-table PDA is what SNS / iqpages point at to route domains
+  // (e.g. iqgameboy.sol → this pda → browser.iqlabs.dev serves the site).
+  // Pure deterministic derivation, so memoize the keypair input.
+  const commitTablePdaB58 = useMemo(() => {
+    if (!ownerAddress || !repoName) return null;
+    try {
+      return pdaForCommitTable(ownerAddress, repoName).toBase58();
+    } catch {
+      return null;
+    }
+  }, [ownerAddress, repoName]);
   const treeQuery = useFileTree(headCommit?.treeTxId);
   const fileTree = useMemo(() => (treeQuery.data ? buildTree(treeQuery.data) : []), [treeQuery.data]);
 
@@ -296,6 +308,20 @@ export function RepoView({
                   <span className="px-2 py-0.5 border border-neon-green/60 text-neon-green bg-neon-green/10 flex items-center gap-1">
                     <Globe size={10} /> DEPLOYED
                   </span>
+                )}
+                {commitTablePdaB58 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(commitTablePdaB58);
+                      toast.success("Commit-table PDA copied");
+                    }}
+                    className="px-2 py-0.5 border border-neon-yellow/50 text-neon-yellow bg-neon-yellow/5 flex items-center gap-1 hover:bg-neon-yellow/10"
+                    title={`Point a .sol domain at this PDA to serve the deployed site on browser.iqlabs.dev\n${commitTablePdaB58}`}
+                  >
+                    PDA: {commitTablePdaB58.slice(0, 4)}…{commitTablePdaB58.slice(-4)}
+                    <Copy size={10} />
+                  </button>
                 )}
               </p>
             </div>
