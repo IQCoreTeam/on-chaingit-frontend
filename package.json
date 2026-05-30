@@ -22,7 +22,7 @@
   "private": true,
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
-    "@iqlabs-official/git-sdk": "^0.1.10",
+    "@iqlabs-official/git-sdk": "^0.1.11",
     "@solana/client": "^1.2.0",
     "@solana/react-hooks": "^1.1.5",
     "@solana/wallet-adapter-base": "^0.9.27",
