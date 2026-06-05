@@ -7,7 +7,9 @@
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitClient } from "@iqlabs-official/git-sdk/browser";
+import type { EthNetwork } from "@iqlabs-official/git-sdk";
 import { PublicKey } from "@solana/web3.js";
+import { BrowserProvider } from "ethers";
 import {
   loadBlob,
   loadTree,
@@ -19,7 +21,7 @@ import {
   fetchSnsResolution,
   fetchTableMeta,
 } from "@/lib/gateway/reader";
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 
 /** GitClient bound to the connected wallet. `onWrite` fires once per row
  *  write (createRepo + commit) so the gateway hears about it instantly. */
@@ -41,6 +43,28 @@ export function useGitClient(): GitClient | null {
       onWrite: ({ tablePda, sig, row }) => notifyGateway(tablePda, sig, row, owner),
     });
   }, [connection, wallet]);
+}
+
+/** GitClient bound to an injected EVM wallet (window.ethereum).
+ *  Returns null until the user has connected and accounts are available.
+ *  Recreates the client whenever `network` changes. */
+export function useEthGitClient(network: EthNetwork = "sepolia"): GitClient | null {
+  const [client, setClient] = useState<GitClient | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const eth = typeof window !== "undefined" && (window as any).ethereum;
+    if (!eth) return;
+    const provider = new BrowserProvider(eth);
+    let cancelled = false;
+    provider.getSigner().then((signer) => {
+      if (cancelled) return;
+      setClient(new GitClient({ chain: "eth", signer, network }));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [network]);
+
+  return client;
 }
 
 export function useRegistry(options?: { limit?: number; before?: string }) {

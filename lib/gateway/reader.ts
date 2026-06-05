@@ -21,8 +21,9 @@ import type {
 import {
   IQGIT_ROOT_ID,
   REGISTRY_HINT,
-  commitTablePda,
+  commitTableHint,
   repoListHint,
+  type TableRef,
 } from "@iqlabs-official/git-sdk";
 import { NETWORK } from "@/lib/network";
 
@@ -68,7 +69,9 @@ export function pdaForRegistry(): PublicKey {
 export function pdaForOwnerRepos(owner: string): PublicKey {
   return tablePdaFromHint(repoListHint(owner));
 }
-export const pdaForCommitTable = commitTablePda;
+export function pdaForCommitTable(owner: string, repo: string): PublicKey {
+  return tablePdaFromHint(commitTableHint(owner, repo));
+}
 
 // ---------------------------------------------------------------
 // Reads — gateway first, SDK fallback
@@ -97,20 +100,21 @@ async function readTableRowsGW<T>(
 
 export function readRegistryPage(opts?: RowsOpts): Promise<RegistryEntry[]> {
   return readTableRowsGW<RegistryEntry>(pdaForRegistry(), opts, () =>
-    sdkReadRegistryPage(undefined as never, opts),
+    sdkReadRegistryPage(opts),
   );
 }
 
 export function readOwnerRepos(owner: string): Promise<Repository[]> {
   return readTableRowsGW<Repository>(pdaForOwnerRepos(owner), undefined, () =>
-    sdkReadOwnerRepos(undefined as never, owner),
+    sdkReadOwnerRepos(owner),
   );
 }
 
 // Commit history keyed by the commit-table PDA. owner/repo callers derive the
 // PDA with pdaForCommitTable; a .sol / dbroot caller passes its PDA straight in.
 export function readCommitHistoryByPda(pda: PublicKey, opts?: RowsOpts): Promise<Commit[]> {
-  return readTableRowsGW<Commit>(pda, opts, () => sdkReadCommitHistory(pda, opts));
+  // On Solana the adapter narrows TableRef back to PublicKey internally.
+  return readTableRowsGW<Commit>(pda, opts, () => sdkReadCommitHistory(pda as unknown as TableRef, opts));
 }
 
 export function readCommitHistory(owner: string, repo: string, opts?: RowsOpts): Promise<Commit[]> {

@@ -22,7 +22,7 @@
   "private": true,
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
-    "@iqlabs-official/git-sdk": "^0.1.13",
+    "@iqlabs-official/git-sdk": "file:../iqlabs-git-sdk",
     "@solana/client": "^1.2.0",
     "@solana/react-hooks": "^1.1.5",
     "@solana/wallet-adapter-base": "^0.9.27",
@@ -34,6 +34,7 @@
     "buffer": "^6.0.3",
     "diff": "^8.0.3",
     "diff2html": "^3.4.55",
+    "ethers": "^6.16.0",
     "iqlabs-sdk": "npm:@iqlabs-official/solana-sdk@^0.1.27",
     "lucide-react": "^0.563.0",
     "next": "16.0.10",

@@ -1,44 +1,85 @@
-// Single source of truth for everything that differs between the mainnet and
-// devnet builds. GHCR images can't carry .env (the Dockerfile strips it), so
-// the network is pinned in code and selected per branch. Keeping it all here
-// means the ONLY thing that differs between the `main` and `devnet` branches
-// is the CLUSTER line below — every other file imports NETWORK and stays
-// identical across branches, so feature work merges cleanly.
+// Single source of truth for network config. Solana clusters are selected per
+// branch (CLUSTER line). EVM networks are user-selectable at runtime via the
+// network selector UI — each maps to an SDK NetworkToken passed to setNetwork().
 //
-// To switch a branch's target, change CLUSTER. Nothing else.
+// Solana: CLUSTER pin keeps branch behaviour identical (feature merges cleanly).
+// EVM:    added for the evm-port; the multi-chain gateway (gateway.iqlabs.dev)
+//         serves all EVM networks via ?network=<evmnet>.
 
-type Cluster = "mainnet" | "devnet";
+import type { NetworkToken } from "@iqlabs-official/git-sdk";
+
+export type SolanaCluster = "mainnet" | "devnet";
+export type ChainFamily = "solana" | "eth";
 
 // ⬇️ The one line that differs between branches. main → "mainnet", devnet → "devnet".
-const CLUSTER: Cluster = "mainnet";
+const CLUSTER: SolanaCluster = "mainnet";
 
-interface NetworkConfig {
-  /** RPC the wallet adapter + SDK reader connection use. */
-  rpcEndpoint: string;
+export interface NetworkConfig {
+  family: ChainFamily;
+  /** SDK token for setNetwork(). */
+  token: NetworkToken;
   /** Gateways tried in order (first is primary). */
   gateways: string[];
   /** Base for serving on-chain sites (`/site/<sig>/...`). */
   gatewaySiteBase: string;
-  /** Solscan query suffix for tx links ("" on mainnet, "?cluster=devnet" on devnet). */
-  solscanQuery: string;
+  /** RPC the Solana wallet adapter uses (undefined on EVM). */
+  rpcEndpoint?: string;
+  /** Solscan query suffix for tx links (Solana only). */
+  solscanQuery?: string;
+  /** Block explorer base for EVM tx links. */
+  explorerBase?: string;
+  /** Human-readable label for the network selector. */
+  label: string;
 }
 
-// origin-restricted public Helius key (browser-safe; same key both clusters).
 const HELIUS_KEY = "fbb113ce-eeb4-4277-8c44-7153632d175a";
+const MULTICHAIN_GATEWAY = "https://gateway.iqlabs.dev";
 
-const CONFIGS: Record<Cluster, NetworkConfig> = {
+export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
   mainnet: {
+    family: "solana",
+    token: "mainnet",
+    label: "Solana Mainnet",
     rpcEndpoint: `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`,
-    gateways: ["https://gateway.iqlabs.dev"],
-    gatewaySiteBase: "https://gateway.iqlabs.dev/site",
+    gateways: [MULTICHAIN_GATEWAY],
+    gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
     solscanQuery: "",
   },
   devnet: {
+    family: "solana",
+    token: "devnet",
+    label: "Solana Devnet",
     rpcEndpoint: `https://devnet.helius-rpc.com/?api-key=${HELIUS_KEY}`,
     gateways: ["https://dev-gateway.iqlabs.dev"],
     gatewaySiteBase: "https://dev-gateway.iqlabs.dev/site",
     solscanQuery: "?cluster=devnet",
   },
+  sepolia: {
+    family: "eth",
+    token: "sepolia",
+    label: "Ethereum Sepolia",
+    gateways: [MULTICHAIN_GATEWAY],
+    gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
+    explorerBase: "https://sepolia.etherscan.io/tx/",
+  },
+  monad: {
+    family: "eth",
+    token: "monad",
+    label: "Monad",
+    gateways: [MULTICHAIN_GATEWAY],
+    gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
+    explorerBase: "https://explorer.monad.xyz/tx/",
+  },
+  monadTestnet: {
+    family: "eth",
+    token: "monadTestnet",
+    label: "Monad Testnet",
+    gateways: [MULTICHAIN_GATEWAY],
+    gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
+    explorerBase: "https://testnet.monadexplorer.com/tx/",
+  },
 };
 
-export const NETWORK: NetworkConfig = CONFIGS[CLUSTER];
+/** The default network for this build. Branch-pinned for Solana deploys;
+ *  users can override at runtime via the network selector. */
+export const NETWORK: NetworkConfig = NETWORK_CONFIGS[CLUSTER];

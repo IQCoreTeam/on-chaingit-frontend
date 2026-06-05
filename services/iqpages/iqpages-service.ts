@@ -13,16 +13,28 @@
 
 import { setRpcUrl } from "iqlabs-sdk";
 import { setGatewayUrls } from "@iqlabs-official/git-sdk/browser";
-import {
-  deployPages,
-  isPagesDeployed,
-  listPagesDeployments,
-  readPagesConfig,
-  readPagesProfile,
-  type PagesConfig,
-  type PagesDeployment,
-  type PagesProfile,
-} from "@iqlabs-official/git-sdk/browser";
+
+// deployPages / isPagesDeployed / listPagesDeployments / readPagesConfig /
+// readPagesProfile are planned git-sdk 0.1.13 features not yet in 0.1.14.
+// Stubbed until the SDK pages layer ships.
+type PagesConfig = { name: string; version: string; description: string; entry: string };
+type PagesDeployment = { id: string; owner: string; repo: string; deployedAt: number };
+type PagesProfile = { displayName: string; description: string; icon?: string; routes?: Record<string, string> };
+async function deployPages(_conn: unknown, _signer: unknown, _repo: string): Promise<{ sig: string }> {
+  throw new Error("iqpages: not yet available — requires git-sdk pages layer");
+}
+async function isPagesDeployed(_owner: string, _repo: string): Promise<boolean> {
+  throw new Error("iqpages: not yet available — requires git-sdk pages layer");
+}
+async function listPagesDeployments(): Promise<PagesDeployment[]> {
+  throw new Error("iqpages: not yet available — requires git-sdk pages layer");
+}
+async function readPagesConfig(_owner: string, _repo: string): Promise<PagesConfig | null> {
+  throw new Error("iqpages: not yet available — requires git-sdk pages layer");
+}
+async function readPagesProfile(_owner: string, _repo: string): Promise<PagesProfile | null> {
+  throw new Error("iqpages: not yet available — requires git-sdk pages layer");
+}
 import {
   PublicKey,
   Transaction,
