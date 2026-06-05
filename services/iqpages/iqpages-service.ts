@@ -1,50 +1,45 @@
-// IqpagesService — single `iqpages-root/deployed` table model.
+// IqpagesService — thin wrapper over the git-sdk pages layer.
 //
-//   • deploy() = append one row {id: "<owner>:<repo>", owner, repo, deployedAt}
-//   • isDeployed() = look up by id
-//   • listAll() = readRows of the single table
-//   • readConfig/readProfile = always pull from the repo's *current* git
-//     commit via @iqlabs-official/git-sdk helpers — no on-chain snapshot caching.
+// All on-chain logic (deploy marker row, fee transfer, deploy-marker lookup,
+// reading iqpages.json/iqprofile.json from the repo's latest commit) lives in
+// `@iqlabs-official/git-sdk`'s pages layer as of 0.1.13, so the CLI and this
+// frontend share ONE implementation. This file only:
+//   • adapts the wallet-adapter shape to the SDK's SignerInput,
+//   • points the SDK reader/gateway at this app's configured network,
+//   • keeps the UI-only bits (templates + validators) the setup page imports.
 //
-// One-time fee (FEE_LAMPORTS) is transferred alongside the deploy row so
-// the marker registration is atomic from the user's perspective.
+// The deploy fee, table layout, and root id are all defined SDK-side now —
+// see the git-sdk pages layer / core/seed for the source of truth.
 
+import { setRpcUrl } from "iqlabs-sdk";
+import { setGatewayUrls } from "@iqlabs-official/git-sdk/browser";
+import {
+  deployPages,
+  isPagesDeployed,
+  listPagesDeployments,
+  readPagesConfig,
+  readPagesProfile,
+  type PagesConfig,
+  type PagesDeployment,
+  type PagesProfile,
+} from "@iqlabs-official/git-sdk/browser";
 import {
   PublicKey,
-  SystemProgram,
   Transaction,
   type Connection,
   type VersionedTransaction,
 } from "@solana/web3.js";
-import iqlabs from "iqlabs-sdk";
 import type { SignerInput } from "iqlabs-sdk/utils";
-import {
-  loadBlob,
-  loadTree,
-  notifyGateway,
-  readLatestCommit,
-} from "@/lib/gateway/reader";
 import { NETWORK } from "@/lib/network";
 
-export interface IqpagesConfig {
-  name: string;
-  version: string;
-  description: string;
-  entry: string;
-}
+// Re-export the SDK config/profile shapes under the names the components used
+// before the consolidation, so imports don't churn.
+export type IqpagesConfig = PagesConfig;
+export type IqprofileConfig = PagesProfile;
+export type DeploymentRow = PagesDeployment;
 
-export interface IqprofileConfig {
-  displayName: string;
-  description: string;
-  icon?: string;
-  routes?: { profile?: string; myPage?: string };
-}
-
+// Filenames the setup page references when staging the config blobs.
 export const IQPAGES_CONSTANTS = {
-  ROOT_ID: "iqpages-root",
-  TABLE_HINT: "deployed",
-  FEE_LAMPORTS: 200_000_000,
-  FEE_RECIPIENT: "EWNSTD8tikwqHMcRNuuNbZrnYJUiJdKq9UXLXSEU4wZ1",
   CONFIG_FILENAME: "iqpages.json",
   PROFILE_FILENAME: "iqprofile.json",
 } as const;
@@ -83,26 +78,10 @@ export function validateIqprofileConfig(obj: unknown): asserts obj is IqprofileC
   if (typeof description !== "string") throw new Error("iqprofile.json: description required");
 }
 
-const buildId = (owner: string, repo: string) => `${owner}:${repo}`;
-
 interface WalletAdapter {
   publicKey: PublicKey | null;
   signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T>;
   signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]>;
-}
-
-export interface DeploymentRow {
-  id: string;
-  owner: string;
-  repo: string;
-  deployedAt: number;
-}
-
-function tablePda(): PublicKey {
-  const rootSeed = iqlabs.utils.toSeedBytes(IQPAGES_CONSTANTS.ROOT_ID);
-  const tableSeed = iqlabs.utils.toSeedBytes(IQPAGES_CONSTANTS.TABLE_HINT);
-  const dbRoot = iqlabs.contract.getDbRootPda(rootSeed);
-  return iqlabs.contract.getTablePda(dbRoot, tableSeed);
 }
 
 export class IqpagesService {
@@ -112,6 +91,11 @@ export class IqpagesService {
   constructor(connection: Connection, wallet: WalletAdapter) {
     this.connection = connection;
     this.wallet = wallet;
+    // The SDK reader resolves a process-global RPC and infers its gateway from
+    // it. Pin both to this app's network so reads hit the same endpoints the
+    // rest of the UI uses (mirrors what GitClient does in its constructor).
+    setRpcUrl(connection.rpcEndpoint);
+    setGatewayUrls(NETWORK.gateways);
   }
 
   private get signer(): SignerInput {
@@ -123,113 +107,26 @@ export class IqpagesService {
     };
   }
 
-  async listAll(): Promise<DeploymentRow[]> {
-    const pda = tablePda();
-    try {
-      const url = `${NETWORK.gateways[0]}/table/${pda.toBase58()}/rows`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        const rows = Array.isArray(data) ? data : data.rows ?? [];
-        return rows as DeploymentRow[];
-      }
-    } catch (e) {
-      console.warn("[gateway] iqpages listAll fallback to RPC", e);
-    }
-    const rows = await iqlabs.reader.readTableRows(pda);
-    return rows as unknown as DeploymentRow[];
+  listAll(): Promise<DeploymentRow[]> {
+    return listPagesDeployments();
   }
 
-  async isDeployed(owner: string, repo: string): Promise<boolean> {
-    const all = await this.listAll();
-    const id = buildId(owner, repo);
-    return all.some((r) => r.id === id);
+  isDeployed(owner: string, repo: string): Promise<boolean> {
+    return isPagesDeployed(owner, repo);
   }
 
-  /** Read iqpages.json from the repo's latest git commit. Returns null when
-   *  the repo has no commits or the file is absent. */
-  async readConfig(owner: string, repo: string): Promise<IqpagesConfig | null> {
-    return this.readJsonFromLatest<IqpagesConfig>(owner, repo, IQPAGES_CONSTANTS.CONFIG_FILENAME);
+  readConfig(owner: string, repo: string): Promise<IqpagesConfig | null> {
+    return readPagesConfig(owner, repo);
   }
 
-  async readProfile(owner: string, repo: string): Promise<IqprofileConfig | null> {
-    return this.readJsonFromLatest<IqprofileConfig>(owner, repo, IQPAGES_CONSTANTS.PROFILE_FILENAME);
+  readProfile(owner: string, repo: string): Promise<IqprofileConfig | null> {
+    return readPagesProfile(owner, repo);
   }
 
-  private async readJsonFromLatest<T>(
-    owner: string,
-    repo: string,
-    filename: string,
-  ): Promise<T | null> {
-    const latest = await readLatestCommit(owner, repo);
-    if (!latest) return null;
-    const tree = await loadTree(latest.treeTxId);
-    const entry = tree[filename];
-    if (!entry?.txId) return null;
-    const base64 = await loadBlob(entry.txId);
-    return JSON.parse(Buffer.from(base64, "base64").toString("utf8")) as T;
-  }
-
-  /** Register the repo in the gallery. One-shot — second call throws. */
+  /** Register the repo in the gallery. One-shot — second call throws. Returns
+   *  the marker-row signature. */
   async deploy(repo: string): Promise<string> {
-    const { publicKey } = this.wallet;
-    if (!publicKey) throw new Error("Wallet not connected");
-    const owner = publicKey.toBase58();
-
-    if (await this.isDeployed(owner, repo)) {
-      throw new Error(`already deployed: ${owner}/${repo}`);
-    }
-
-    // Sanity-check that iqpages.json actually lives in the repo before we
-    // charge anyone — keeps the gallery from filling up with broken links.
-    const config = await this.readConfig(owner, repo);
-    if (!config) {
-      throw new Error(
-        `${IQPAGES_CONSTANTS.CONFIG_FILENAME} missing in ${repo}. Commit it first, then deploy.`,
-      );
-    }
-    validateIqpagesConfig(config);
-
-    const balance = await this.connection.getBalance(publicKey);
-    const needed = IQPAGES_CONSTANTS.FEE_LAMPORTS + 50_000_000;
-    if (balance < needed) {
-      throw new Error(
-        `insufficient balance: have ${balance / 1e9} SOL, need at least ${needed / 1e9} SOL`,
-      );
-    }
-
-    const row: DeploymentRow = {
-      id: buildId(owner, repo),
-      owner,
-      repo,
-      deployedAt: Date.now(),
-    };
-    const sig = await iqlabs.writer.writeRow(
-      this.connection,
-      this.signer,
-      IQPAGES_CONSTANTS.ROOT_ID,
-      IQPAGES_CONSTANTS.TABLE_HINT,
-      JSON.stringify(row),
-    );
-    notifyGateway(tablePda().toBase58(), sig, row, owner);
-
-    const transferTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: publicKey,
-        toPubkey: new PublicKey(IQPAGES_CONSTANTS.FEE_RECIPIENT),
-        lamports: IQPAGES_CONSTANTS.FEE_LAMPORTS,
-      }),
-    );
-    transferTx.feePayer = publicKey;
-    const latest = await this.connection.getLatestBlockhash();
-    transferTx.recentBlockhash = latest.blockhash;
-    const signed = await this.wallet.signTransaction(transferTx);
-    const feeSig = await this.connection.sendRawTransaction(signed.serialize());
-    await this.connection.confirmTransaction(
-      { signature: feeSig, blockhash: latest.blockhash, lastValidBlockHeight: latest.lastValidBlockHeight },
-      "confirmed",
-    );
-
+    const { sig } = await deployPages(this.connection, this.signer, repo);
     return sig;
   }
 }
