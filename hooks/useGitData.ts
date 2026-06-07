@@ -132,6 +132,7 @@ export function useCommitsByPda(pda: PublicKey | undefined) {
 }
 
 const PUBKEY_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const EVM_ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
 /** What a /[ident] segment resolves to. */
 export type GitEntry =
@@ -159,6 +160,8 @@ async function resolveEntry(ident: string): Promise<GitEntry> {
     const target = record ?? owner;
     return target ? resolvePubkey(target) : { kind: "invalid" };
   }
+  // EVM address (0x + 40 hex chars) — treat as owner directly, no PDA lookup.
+  if (EVM_ADDR_RE.test(s)) return { kind: "owner", owner: s };
   if (PUBKEY_RE.test(s)) return resolvePubkey(s);
   return { kind: "invalid" };
 }
