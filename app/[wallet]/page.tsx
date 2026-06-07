@@ -8,7 +8,7 @@ import { useGitEntry, useOwnerRepos, useCommitsByPda } from "@/hooks/useGitData"
 import { useIqpagesDeployed } from "@/hooks/useIqpagesData";
 import { RepoView } from "@/app/components/RepoView";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { NetworkSelector } from "@/app/components/NetworkSelector";
 import { Box, RefreshCw, User } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -92,7 +92,7 @@ function OwnerRepoList({ owner }: { owner: string }) {
                 My // Repos
               </Link>
             )}
-            <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
+            <NetworkSelector />
           </div>
         </div>
       </nav>

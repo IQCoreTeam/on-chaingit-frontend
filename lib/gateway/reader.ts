@@ -23,18 +23,22 @@ import {
   REGISTRY_HINT,
   commitTableHint,
   repoListHint,
+  getGatewayUrls,
   type TableRef,
 } from "@iqlabs-official/git-sdk";
-import { NETWORK } from "@/lib/network";
 
 const GATEWAY_OVERRIDE_KEY = "iqgit_gateway";
 
+// Follow the active network: NetworkProvider calls setGatewayUrls(cfg.gateways)
+// on every switch, so the SDK's getGatewayUrls() is the live source of truth —
+// no build-fixed NETWORK coupling here.
 function getGateways(): string[] {
+  const active = getGatewayUrls();
   if (typeof window !== "undefined") {
     const custom = window.localStorage.getItem(GATEWAY_OVERRIDE_KEY);
-    if (custom) return [custom, ...NETWORK.gateways];
+    if (custom) return [custom, ...active];
   }
-  return NETWORK.gateways;
+  return active;
 }
 
 async function gwFetch(path: string): Promise<Response> {

@@ -9,7 +9,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { GitClient } from "@iqlabs-official/git-sdk/browser";
 import type { EthNetwork } from "@iqlabs-official/git-sdk";
 import { PublicKey } from "@solana/web3.js";
-import { BrowserProvider } from "ethers";
 import {
   loadBlob,
   loadTree,
@@ -21,9 +20,11 @@ import {
   fetchSnsResolution,
   fetchTableMeta,
 } from "@/lib/gateway/reader";
-import { useMemo, useState, useEffect } from "react";
+import { useMemo } from "react";
+import { useNetwork } from "@/app/components/NetworkProvider";
+import { useEvmWallet } from "@/app/components/EvmWalletProvider";
 
-/** GitClient bound to the connected wallet. `onWrite` fires once per row
+/** GitClient bound to the connected Solana wallet. `onWrite` fires once per row
  *  write (createRepo + commit) so the gateway hears about it instantly. */
 export function useGitClient(): GitClient | null {
   const { connection } = useConnection();
@@ -45,39 +46,45 @@ export function useGitClient(): GitClient | null {
   }, [connection, wallet]);
 }
 
-/** GitClient bound to an injected EVM wallet (window.ethereum).
- *  Returns null until the user has connected and accounts are available.
- *  Recreates the client whenever `network` changes. */
-export function useEthGitClient(network: EthNetwork = "sepolia"): GitClient | null {
-  const [client, setClient] = useState<GitClient | null>(null);
+/** GitClient bound to the shared EVM wallet (EvmWalletProvider) + the active
+ *  EVM network. Null until the active network is an EVM one and a wallet is
+ *  connected. */
+export function useEthGitClient(): GitClient | null {
+  const { network } = useNetwork();
+  const { signer, connected } = useEvmWallet();
+  return useMemo(() => {
+    if (network.family !== "eth" || !connected || !signer) return null;
+    return new GitClient({
+      chain: "eth",
+      signer,
+      network: network.token as EthNetwork,
+    });
+  }, [network.family, network.token, signer, connected]);
+}
 
-  useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const eth = typeof window !== "undefined" && (window as any).ethereum;
-    if (!eth) return;
-    const provider = new BrowserProvider(eth);
-    let cancelled = false;
-    provider.getSigner().then((signer) => {
-      if (cancelled) return;
-      setClient(new GitClient({ chain: "eth", signer, network }));
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [network]);
-
-  return client;
+/** The GitClient for whichever chain is active. The 3 write pages call this so
+ *  they never branch on chain themselves. Both underlying hooks run every
+ *  render (hooks rules); we just pick by the active network family. */
+export function useActiveGitClient(): GitClient | null {
+  const { network } = useNetwork();
+  const solanaClient = useGitClient();
+  const ethClient = useEthGitClient();
+  return network.family === "solana" ? solanaClient : ethClient;
 }
 
 export function useRegistry(options?: { limit?: number; before?: string }) {
+  const { networkKey } = useNetwork();
   return useQuery({
-    queryKey: ["registry", options?.limit ?? null, options?.before ?? null],
+    queryKey: ["registry", networkKey, options?.limit ?? null, options?.before ?? null],
     queryFn: () => readRegistryPage(options),
     staleTime: 60_000,
   });
 }
 
 export function useOwnerRepos(owner: string | undefined) {
+  const { networkKey } = useNetwork();
   return useQuery({
-    queryKey: ["repos", owner],
+    queryKey: ["repos", networkKey, owner],
     queryFn: () => readOwnerRepos(owner!),
     staleTime: 60_000,
     enabled: !!owner,
@@ -85,8 +92,9 @@ export function useOwnerRepos(owner: string | undefined) {
 }
 
 export function useCommits(owner: string | undefined, repoName: string | undefined) {
+  const { networkKey } = useNetwork();
   return useQuery({
-    queryKey: ["commits", owner, repoName],
+    queryKey: ["commits", networkKey, owner, repoName],
     queryFn: () => readCommitHistory(owner!, repoName!),
     staleTime: 30_000,
     enabled: !!owner && !!repoName,
@@ -139,8 +147,9 @@ async function resolveEntry(ident: string): Promise<GitEntry> {
 /** Dispatch a /[ident] segment (a .sol domain, a commit-table PDA, or an owner
  *  wallet) to a repo view or an owner repo list. */
 export function useGitEntry(ident: string | undefined) {
+  const { networkKey } = useNetwork();
   return useQuery<GitEntry>({
-    queryKey: ["git-entry", ident],
+    queryKey: ["git-entry", networkKey, ident],
     queryFn: () => resolveEntry(ident!),
     staleTime: 5 * 60_000,
     enabled: !!ident,
@@ -169,9 +178,17 @@ export function useFileContent(txId: string | undefined) {
 
 export function useInvalidateRepo() {
   const qc = useQueryClient();
+  // Match by prefix after the networkKey segment — predicate keeps this robust
+  // to the networkKey now sitting in every read queryKey.
   return (owner: string, repoName: string) => {
-    qc.invalidateQueries({ queryKey: ["repos", owner] });
-    qc.invalidateQueries({ queryKey: ["commits", owner, repoName] });
-    qc.invalidateQueries({ queryKey: ["registry"] });
+    qc.invalidateQueries({
+      predicate: (q) => {
+        const k = q.queryKey as unknown[];
+        if (k[0] === "registry") return true;
+        if (k[0] === "repos" && k[2] === owner) return true;
+        if (k[0] === "commits" && k[2] === owner && k[3] === repoName) return true;
+        return false;
+      },
+    });
   };
 }

@@ -28,6 +28,16 @@ export interface NetworkConfig {
   solscanQuery?: string;
   /** Block explorer base for EVM tx links. */
   explorerBase?: string;
+  /** EVM chain id (hex, e.g. "0xaa36a7") for wallet_switchEthereumChain. */
+  chainIdHex?: string;
+  /** wallet_addEthereumChain params, for chains MetaMask may not know. */
+  chainParams?: {
+    chainId: string;
+    chainName: string;
+    nativeCurrency: { name: string; symbol: string; decimals: number };
+    rpcUrls: string[];
+    blockExplorerUrls?: string[];
+  };
   /** Human-readable label for the network selector. */
   label: string;
 }
@@ -61,6 +71,7 @@ export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
     gateways: [MULTICHAIN_GATEWAY],
     gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
     explorerBase: "https://sepolia.etherscan.io/tx/",
+    chainIdHex: "0xaa36a7", // 11155111
   },
   monad: {
     family: "eth",
@@ -69,6 +80,14 @@ export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
     gateways: [MULTICHAIN_GATEWAY],
     gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
     explorerBase: "https://explorer.monad.xyz/tx/",
+    chainIdHex: "0x8f", // 143
+    chainParams: {
+      chainId: "0x8f",
+      chainName: "Monad",
+      nativeCurrency: { name: "Monad", symbol: "MON", decimals: 18 },
+      rpcUrls: ["https://rpc.monad.xyz"],
+      blockExplorerUrls: ["https://explorer.monad.xyz"],
+    },
   },
   monadTestnet: {
     family: "eth",
@@ -77,9 +96,23 @@ export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
     gateways: [MULTICHAIN_GATEWAY],
     gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
     explorerBase: "https://testnet.monadexplorer.com/tx/",
+    chainIdHex: "0x279f", // 10143
+    chainParams: {
+      chainId: "0x279f",
+      chainName: "Monad Testnet",
+      nativeCurrency: { name: "Monad", symbol: "MON", decimals: 18 },
+      rpcUrls: ["https://testnet-rpc.monad.xyz"],
+      blockExplorerUrls: ["https://testnet.monadexplorer.com"],
+    },
   },
 };
 
+/** The branch-pinned default network key — the SSR/first-render default before
+ *  localStorage restores the user's last choice. */
+export const DEFAULT_NETWORK_KEY: string = CLUSTER;
+
 /** The default network for this build. Branch-pinned for Solana deploys;
- *  users can override at runtime via the network selector. */
+ *  users can override at runtime via the network selector.
+ *  @deprecated read the active network from `useNetwork()` instead — this is
+ *  the build-fixed default only, kept for the few non-React call sites. */
 export const NETWORK: NetworkConfig = NETWORK_CONFIGS[CLUSTER];

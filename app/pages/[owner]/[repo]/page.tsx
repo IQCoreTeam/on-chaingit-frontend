@@ -2,16 +2,14 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { NetworkSelector } from "@/app/components/NetworkSelector";
 import {
   useIqpagesConfig,
   useIqpagesProfile,
   useIqpagesDeployed,
   useLatestTreeTxId,
 } from "@/hooks/useIqpagesData";
-import { NETWORK } from "@/lib/network";
-
-const GATEWAY_SITE_BASE = NETWORK.gatewaySiteBase;
+import { useNetwork } from "@/app/components/NetworkProvider";
 
 function openWithDyor(owner: string, repoName: string, url: string) {
   const key = `dyor-ack-${owner}/${repoName}`;
@@ -35,15 +33,16 @@ export default function PageDetail() {
   const { data: config, isLoading: loadingConfig } = useIqpagesConfig(owner, repoName);
   const { data: profile } = useIqpagesProfile(owner, repoName);
   const { data: treeTxId } = useLatestTreeTxId(owner, repoName);
+  const { network } = useNetwork();
 
   if (!owner || !repoName) return null;
 
   const isLoading = loadingDeployed || loadingConfig;
   const liveUrl = config && treeTxId
-    ? `${GATEWAY_SITE_BASE}/${treeTxId}/${config.entry}`
+    ? `${network.gatewaySiteBase}/${treeTxId}/${config.entry}`
     : null;
   const iconUrl = profile?.icon && treeTxId
-    ? `${GATEWAY_SITE_BASE}/${treeTxId}/${profile.icon.replace(/^\.\//, "")}`
+    ? `${network.gatewaySiteBase}/${treeTxId}/${profile.icon.replace(/^\.\//, "")}`
     : null;
 
   return (
@@ -55,7 +54,7 @@ export default function PageDetail() {
           <Link href="/pages" className="text-sm font-tech text-neon-cyan uppercase tracking-widest hover:text-white">
             ← All Pages
           </Link>
-          <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
+          <NetworkSelector />
         </div>
       </nav>
 

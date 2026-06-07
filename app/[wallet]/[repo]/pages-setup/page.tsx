@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { NetworkSelector } from "@/app/components/NetworkSelector";
 import { toast } from "sonner";
-import { useGitClient, useFileTree, useCommits, useInvalidateRepo } from "@/hooks/useGitData";
+import { useActiveGitClient, useFileTree, useCommits, useInvalidateRepo } from "@/hooks/useGitData";
 import { useIqpagesConfig, useIqpagesProfile, useIqpagesService } from "@/hooks/useIqpagesData";
 import { loadBlob } from "@iqlabs-official/git-sdk/browser";
 import {
@@ -28,7 +28,7 @@ export default function PagesSetup() {
   const owner = params?.wallet;
   const repoName = params?.repo;
   const isOwner = walletAdapter.publicKey?.toBase58() === owner;
-  const client = useGitClient();
+  const client = useActiveGitClient();
   const iqpagesSvc = useIqpagesService();
   const invalidate = useInvalidateRepo();
   const { data: commits } = useCommits(owner, repoName);
@@ -202,7 +202,7 @@ export default function PagesSetup() {
           <Link href={`/${owner}/${repoName}`} className="text-sm font-tech text-neon-cyan uppercase tracking-widest hover:text-white">
             ← {repoName}
           </Link>
-          <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
+          <NetworkSelector />
         </div>
       </nav>
 

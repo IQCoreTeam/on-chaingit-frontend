@@ -10,7 +10,7 @@
 import { useIqpagesList } from "@/hooks/useIqpagesData";
 import { useOwnerRepos } from "@/hooks/useGitData";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { NetworkSelector } from "@/app/components/NetworkSelector";
 import { Globe, Plus } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -65,7 +65,7 @@ export default function PagesGallery() {
                 My // Repos
               </Link>
             )}
-            <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
+            <NetworkSelector />
           </div>
         </div>
       </nav>
