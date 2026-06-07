@@ -4,7 +4,11 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { useQuery } from "@tanstack/react-query";
 import { readLatestCommit } from "@/lib/gateway/reader";
 import { useMemo } from "react";
-import type { GitSigner } from "@iqlabs-official/git-sdk/browser";
+import {
+  commitTableRef,
+  readLatestCommit as sdkReadLatestCommit,
+  type GitSigner,
+} from "@iqlabs-official/git-sdk/browser";
 import { IqpagesService } from "@/services/iqpages/iqpages-service";
 import { useNetwork } from "@/app/components/NetworkProvider";
 import { useEvmWallet } from "@/app/components/EvmWalletProvider";
@@ -77,9 +81,16 @@ export function useIqpagesDeployed(owner: string | undefined, repoName: string |
 
 /** Latest commit's treeTxId — used to build gateway / site URLs. */
 export function useLatestTreeTxId(owner: string | undefined, repoName: string | undefined) {
+  const { networkKey, network } = useNetwork();
+  const isEth = network.family === "eth";
   return useQuery({
-    queryKey: ["git", "latestTree", owner, repoName],
-    queryFn: async () => (await readLatestCommit(owner!, repoName!))?.treeTxId ?? null,
+    queryKey: ["git", "latestTree", networkKey, owner, repoName],
+    queryFn: async () => {
+      const latest = isEth
+        ? await sdkReadLatestCommit(commitTableRef(owner!, repoName!))
+        : await readLatestCommit(owner!, repoName!);
+      return latest?.treeTxId ?? null;
+    },
     staleTime: 60_000,
     enabled: !!owner && !!repoName,
   });

@@ -6,7 +6,18 @@
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { GitClient } from "@iqlabs-official/git-sdk/browser";
+import {
+  GitClient,
+  commitTableRef,
+  // SDK chain-neutral readers — route per the active network (setNetwork):
+  // Solana → PDA path, EVM → ?network= gateway path. Used on EVM networks
+  // where the local Solana-PDA reader can't address the data.
+  readCommitHistory as sdkReadCommitHistory,
+  readOwnerRepos as sdkReadOwnerRepos,
+  readRegistryPage as sdkReadRegistryPage,
+  loadTree as sdkLoadTree,
+  loadBlob as sdkLoadBlob,
+} from "@iqlabs-official/git-sdk/browser";
 import type { EthNetwork } from "@iqlabs-official/git-sdk";
 import { PublicKey } from "@solana/web3.js";
 import {
@@ -73,29 +84,37 @@ export function useActiveGitClient(): GitClient | null {
 }
 
 export function useRegistry(options?: { limit?: number; before?: string }) {
-  const { networkKey } = useNetwork();
+  const { networkKey, network } = useNetwork();
+  const isEth = network.family === "eth";
   return useQuery({
     queryKey: ["registry", networkKey, options?.limit ?? null, options?.before ?? null],
-    queryFn: () => readRegistryPage(options),
+    // EVM: SDK reader (gateway-first, ?network=, RPC fallback). Solana: the
+    // local PDA reader. Both already chain-route via setNetwork.
+    queryFn: () => (isEth ? sdkReadRegistryPage(options) : readRegistryPage(options)),
     staleTime: 60_000,
   });
 }
 
 export function useOwnerRepos(owner: string | undefined) {
-  const { networkKey } = useNetwork();
+  const { networkKey, network } = useNetwork();
+  const isEth = network.family === "eth";
   return useQuery({
     queryKey: ["repos", networkKey, owner],
-    queryFn: () => readOwnerRepos(owner!),
+    queryFn: () => (isEth ? sdkReadOwnerRepos(owner!) : readOwnerRepos(owner!)),
     staleTime: 60_000,
     enabled: !!owner,
   });
 }
 
 export function useCommits(owner: string | undefined, repoName: string | undefined) {
-  const { networkKey } = useNetwork();
+  const { networkKey, network } = useNetwork();
+  const isEth = network.family === "eth";
   return useQuery({
     queryKey: ["commits", networkKey, owner, repoName],
-    queryFn: () => readCommitHistory(owner!, repoName!),
+    queryFn: () =>
+      isEth
+        ? sdkReadCommitHistory(commitTableRef(owner!, repoName!))
+        : readCommitHistory(owner!, repoName!),
     staleTime: 30_000,
     enabled: !!owner && !!repoName,
   });
@@ -157,9 +176,11 @@ export function useGitEntry(ident: string | undefined) {
 }
 
 export function useFileTree(treeTxId: string | undefined) {
+  const { networkKey, network } = useNetwork();
+  const isEth = network.family === "eth";
   return useQuery({
-    queryKey: ["tree", treeTxId],
-    queryFn: () => loadTree(treeTxId!),
+    queryKey: ["tree", networkKey, treeTxId],
+    queryFn: () => (isEth ? sdkLoadTree(treeTxId!) : loadTree(treeTxId!)),
     staleTime: Infinity,
     gcTime: 30 * 60_000,
     enabled: !!treeTxId,
@@ -167,9 +188,11 @@ export function useFileTree(treeTxId: string | undefined) {
 }
 
 export function useFileContent(txId: string | undefined) {
+  const { networkKey, network } = useNetwork();
+  const isEth = network.family === "eth";
   return useQuery({
-    queryKey: ["blob", txId],
-    queryFn: () => loadBlob(txId!),
+    queryKey: ["blob", networkKey, txId],
+    queryFn: () => (isEth ? sdkLoadBlob(txId!) : loadBlob(txId!)),
     staleTime: Infinity,
     gcTime: 30 * 60_000,
     enabled: !!txId,
