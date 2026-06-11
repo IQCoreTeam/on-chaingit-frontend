@@ -10,6 +10,9 @@ import {
   useLatestTreeTxId,
 } from "@/hooks/useIqpagesData";
 import { useNetwork } from "@/app/components/NetworkProvider";
+import { pdaForCommitTable } from "@/lib/gateway/reader";
+
+const BROWSER_BASE = "https://browser.iqlabs.dev";
 
 function openWithDyor(owner: string, repoName: string, url: string) {
   const key = `dyor-ack-${owner}/${repoName}`;
@@ -22,6 +25,15 @@ function openWithDyor(owner: string, repoName: string, url: string) {
     localStorage.setItem(key, "1");
   }
   window.open(url, "_blank");
+}
+
+function pdaUrl(owner: string | undefined, repo: string | undefined): string | null {
+  if (!owner || !repo) return null;
+  try {
+    return `${BROWSER_BASE}/${pdaForCommitTable(owner, repo).toBase58()}`;
+  } catch {
+    return null;
+  }
 }
 
 export default function PageDetail() {
@@ -38,9 +50,10 @@ export default function PageDetail() {
   if (!owner || !repoName) return null;
 
   const isLoading = loadingDeployed || loadingConfig;
-  const liveUrl = config && treeTxId
-    ? `${network.gatewaySiteBase}/${treeTxId}/${config.entry}`
-    : null;
+  // Open App points at the commit-table PDA on browser.iqlabs.dev, which
+  // resolves the owner's latest commit + entry itself — so the link doesn't
+  // depend on us having loaded treeTxId/config first.
+  const liveUrl = pdaUrl(owner, repoName);
   const iconUrl = profile?.icon && treeTxId
     ? `${network.gatewaySiteBase}/${treeTxId}/${profile.icon.replace(/^\.\//, "")}`
     : null;
