@@ -358,6 +358,46 @@ export default function PagesSetup() {
             <p className="mt-2 text-xs font-mono text-white/50">
               Shareable link — always serves your repo's latest commit.
             </p>
+
+            <div className="mt-4 pt-4 border-t border-neon-green/30">
+              <p className="text-xs font-tech text-neon-green uppercase tracking-widest mb-2">
+                🌐 Use your own .sol domain (&lt;name&gt;.sol.site)
+              </p>
+              <p className="text-xs font-mono text-white/50 mb-2">
+                Have a .sol domain? Put this site behind{" "}
+                <span className="text-neon-cyan">&lt;your-name&gt;.sol.site</span>:
+              </p>
+              <ol className="text-xs font-mono text-white/60 space-y-1 list-decimal list-inside">
+                <li>
+                  Open{" "}
+                  <a
+                    href="https://sns.id"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-neon-cyan hover:underline"
+                  >
+                    sns.id
+                  </a>{" "}
+                  → your domain → <span className="text-white/80">Sol.site</span> → Configure.
+                </li>
+                <li>
+                  Set the <span className="text-white/80">CNAME</span> to{" "}
+                  <code className="text-neon-cyan">sns.iqlabs.dev</code>
+                </li>
+                <li>
+                  Under <span className="text-white/80">Other records</span>, add your site&apos;s
+                  PDA — use the <span className="text-white/80">SOL</span> record, or a{" "}
+                  <span className="text-white/80">TXT</span> record if there&apos;s no SOL field:
+                </li>
+              </ol>
+              <code className="mt-2 block font-mono text-xs text-neon-cyan break-all bg-black/30 p-2 border border-white/10">
+                {pdaForCommitTable(owner, repoName).toBase58()}
+              </code>
+              <p className="mt-2 text-xs font-mono text-white/40">
+                Sign, wait ~5 min for DNS, and your site is live at
+                https://&lt;your-name&gt;.sol.site
+              </p>
+            </div>
           </div>
         )}
 
