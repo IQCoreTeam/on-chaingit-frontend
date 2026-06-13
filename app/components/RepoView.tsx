@@ -35,7 +35,8 @@ import {
   CommitSkeleton,
 } from "@/app/components/Skeleton";
 import { useFileTree, useFileContent } from "@/hooks/useGitData";
-import { NETWORK } from "@/lib/network";
+import { useNetwork } from "@/app/components/NetworkProvider";
+import { NetworkSelector } from "@/app/components/NetworkSelector";
 import { pdaForCommitTable } from "@/lib/gateway/reader";
 import type { GitClient } from "@iqlabs-official/git-sdk/browser";
 import type { Commit, FileTree } from "@iqlabs-official/git-sdk";
@@ -154,6 +155,15 @@ export function RepoView({
   }, [ownerAddress, repoName]);
   const treeQuery = useFileTree(headCommit?.treeTxId);
   const fileTree = useMemo(() => (treeQuery.data ? buildTree(treeQuery.data) : []), [treeQuery.data]);
+
+  // Tx explorer link, family-aware: Solscan for Solana, the EVM chain's
+  // explorer for eth networks.
+  const { network } = useNetwork();
+  const explorerUrl = (txId: string): string =>
+    network.family === "eth" && network.explorerBase
+      ? `${network.explorerBase}${txId}`
+      : `https://solscan.io/tx/${txId}${network.solscanQuery ?? ""}`;
+  const explorerName = network.family === "eth" ? "explorer" : "Solscan";
 
   const editable = canEdit && !!client && !!repoName;
 
@@ -326,6 +336,7 @@ export function RepoView({
               </p>
             </div>
           </div>
+          <NetworkSelector />
         </div>
 
         <div className="max-w-7xl mx-auto px-6 flex gap-1 mt-4">
@@ -437,13 +448,13 @@ export function RepoView({
                         <>
                           {selectedTxId && (
                             <a
-                              href={`https://solscan.io/tx/${selectedTxId}${NETWORK.solscanQuery}`}
+                              href={explorerUrl(selectedTxId)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-2 px-4 py-1 border border-neon-cyan text-neon-cyan hover:bg-neon-cyan/10 font-tech text-xs uppercase tracking-wider transition-colors"
-                              title={`View tx ${selectedTxId} on Solscan`}
+                              title={`View tx ${selectedTxId} on ${explorerName}`}
                             >
-                              <ExternalLink size={14} /> SEE SOLSCAN
+                              <ExternalLink size={14} /> SEE {explorerName.toUpperCase()}
                             </a>
                           )}
                           {editable && !isImage && (

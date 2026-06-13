@@ -2,16 +2,17 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { NetworkSelector } from "@/app/components/NetworkSelector";
 import {
   useIqpagesConfig,
   useIqpagesProfile,
   useIqpagesDeployed,
   useLatestTreeTxId,
 } from "@/hooks/useIqpagesData";
-import { NETWORK } from "@/lib/network";
+import { useNetwork } from "@/app/components/NetworkProvider";
+import { pdaForCommitTable } from "@/lib/gateway/reader";
 
-const GATEWAY_SITE_BASE = NETWORK.gatewaySiteBase;
+const BROWSER_BASE = "https://browser.iqlabs.dev";
 
 function openWithDyor(owner: string, repoName: string, url: string) {
   const key = `dyor-ack-${owner}/${repoName}`;
@@ -26,6 +27,15 @@ function openWithDyor(owner: string, repoName: string, url: string) {
   window.open(url, "_blank");
 }
 
+function pdaUrl(owner: string | undefined, repo: string | undefined): string | null {
+  if (!owner || !repo) return null;
+  try {
+    return `${BROWSER_BASE}/${pdaForCommitTable(owner, repo).toBase58()}`;
+  } catch {
+    return null;
+  }
+}
+
 export default function PageDetail() {
   const params = useParams<{ owner: string; repo: string }>();
   const owner = params?.owner;
@@ -35,15 +45,17 @@ export default function PageDetail() {
   const { data: config, isLoading: loadingConfig } = useIqpagesConfig(owner, repoName);
   const { data: profile } = useIqpagesProfile(owner, repoName);
   const { data: treeTxId } = useLatestTreeTxId(owner, repoName);
+  const { network } = useNetwork();
 
   if (!owner || !repoName) return null;
 
   const isLoading = loadingDeployed || loadingConfig;
-  const liveUrl = config && treeTxId
-    ? `${GATEWAY_SITE_BASE}/${treeTxId}/${config.entry}`
-    : null;
+  // Open App points at the commit-table PDA on browser.iqlabs.dev, which
+  // resolves the owner's latest commit + entry itself — so the link doesn't
+  // depend on us having loaded treeTxId/config first.
+  const liveUrl = pdaUrl(owner, repoName);
   const iconUrl = profile?.icon && treeTxId
-    ? `${GATEWAY_SITE_BASE}/${treeTxId}/${profile.icon.replace(/^\.\//, "")}`
+    ? `${network.gatewaySiteBase}/${treeTxId}/${profile.icon.replace(/^\.\//, "")}`
     : null;
 
   return (
@@ -55,7 +67,7 @@ export default function PageDetail() {
           <Link href="/pages" className="text-sm font-tech text-neon-cyan uppercase tracking-widest hover:text-white">
             ← All Pages
           </Link>
-          <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
+          <NetworkSelector />
         </div>
       </nav>
 

@@ -4,11 +4,16 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { NetworkSelector } from "@/app/components/NetworkSelector";
 import { toast } from "sonner";
-import { useGitClient, useFileTree, useCommits, useInvalidateRepo } from "@/hooks/useGitData";
+import { useActiveGitClient, useFileTree, useCommits, useInvalidateRepo } from "@/hooks/useGitData";
 import { useIqpagesConfig, useIqpagesProfile, useIqpagesService } from "@/hooks/useIqpagesData";
+import { pdaForCommitTable } from "@/lib/gateway/reader";
 import { loadBlob } from "@iqlabs-official/git-sdk/browser";
+
+// The deployed site's shareable link: browser.iqlabs.dev resolves the owner's
+// latest commit by the commit-table PDA, so it stays correct across re-commits.
+const BROWSER_BASE = "https://browser.iqlabs.dev";
 import {
   IQPAGES_CONSTANTS,
   validateIqpagesConfig,
@@ -28,7 +33,7 @@ export default function PagesSetup() {
   const owner = params?.wallet;
   const repoName = params?.repo;
   const isOwner = walletAdapter.publicKey?.toBase58() === owner;
-  const client = useGitClient();
+  const client = useActiveGitClient();
   const iqpagesSvc = useIqpagesService();
   const invalidate = useInvalidateRepo();
   const { data: commits } = useCommits(owner, repoName);
@@ -45,6 +50,8 @@ export default function PagesSetup() {
   const [iqprofileError, setIqprofileError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  // Set once a deploy succeeds so we can show the live browser.iqlabs.dev link.
+  const [deployedUrl, setDeployedUrl] = useState<string | null>(null);
   // Prefilled-from-chain configs start locked so a stray click can't
   // overwrite them. The user explicitly hits "Edit" to enable the textarea;
   // "Cancel" reverts to the on-chain value.
@@ -181,6 +188,8 @@ export default function PagesSetup() {
     setCommitting(true);
     try {
       const sig = await iqpagesSvc.deploy(repoName);
+      const url = `${BROWSER_BASE}/${pdaForCommitTable(owner, repoName).toBase58()}`;
+      setDeployedUrl(url);
       toast.success(`Deployed: ${sig.slice(0, 12)}…`);
     } catch (e) {
       console.warn("Deploy failed", e);
@@ -202,7 +211,7 @@ export default function PagesSetup() {
           <Link href={`/${owner}/${repoName}`} className="text-sm font-tech text-neon-cyan uppercase tracking-widest hover:text-white">
             ← {repoName}
           </Link>
-          <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
+          <NetworkSelector />
         </div>
       </nav>
 
@@ -332,6 +341,65 @@ export default function PagesSetup() {
             Cancel
           </Link>
         </div>
+
+        {deployedUrl && (
+          <div className="mt-8 p-4 border border-neon-green bg-neon-green/5">
+            <p className="text-xs font-tech text-neon-green uppercase tracking-widest mb-2">
+              ✓ Live — your site is deployed
+            </p>
+            <a
+              href={deployedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-sm text-neon-cyan break-all hover:underline"
+            >
+              {deployedUrl} →
+            </a>
+            <p className="mt-2 text-xs font-mono text-white/50">
+              Shareable link — always serves your repo's latest commit.
+            </p>
+
+            <div className="mt-4 pt-4 border-t border-neon-green/30">
+              <p className="text-xs font-tech text-neon-green uppercase tracking-widest mb-2">
+                🌐 Use your own .sol domain (&lt;name&gt;.sol.site)
+              </p>
+              <p className="text-xs font-mono text-white/50 mb-2">
+                Have a .sol domain? Put this site behind{" "}
+                <span className="text-neon-cyan">&lt;your-name&gt;.sol.site</span>:
+              </p>
+              <ol className="text-xs font-mono text-white/60 space-y-1 list-decimal list-inside">
+                <li>
+                  Open{" "}
+                  <a
+                    href="https://sns.id"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-neon-cyan hover:underline"
+                  >
+                    sns.id
+                  </a>{" "}
+                  → your domain → <span className="text-white/80">Sol.site</span> → Configure.
+                </li>
+                <li>
+                  Set the <span className="text-white/80">CNAME</span> to{" "}
+                  <code className="text-neon-cyan">sns.iqlabs.dev</code>
+                </li>
+                <li>
+                  Under <span className="text-white/80">Other records</span>, add your site&apos;s
+                  PDA — use the <span className="text-white/80">SOL</span> record, or a{" "}
+                  <span className="text-white/80">TXT</span> record if there&apos;s no SOL field:
+                </li>
+              </ol>
+              <code className="mt-2 block font-mono text-xs text-neon-cyan break-all bg-black/30 p-2 border border-white/10">
+                {pdaForCommitTable(owner, repoName).toBase58()}
+              </code>
+              <p className="mt-2 text-xs font-mono text-white/40">
+                Sign, wait ~5 min for DNS, and your site is live at
+                https://&lt;your-name&gt;.sol.site
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="mt-8 p-4 border border-dashed border-white/20 text-xs font-mono text-white/50">
           <p className="mb-1">Note: in-browser commit is a work in progress.</p>

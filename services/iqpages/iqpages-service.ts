@@ -2,17 +2,18 @@
 //
 // All on-chain logic (deploy marker row, fee transfer, deploy-marker lookup,
 // reading iqpages.json/iqprofile.json from the repo's latest commit) lives in
-// `@iqlabs-official/git-sdk`'s pages layer as of 0.1.13, so the CLI and this
+// `@iqlabs-official/git-sdk`'s pages layer as of 0.1.15, so the CLI and this
 // frontend share ONE implementation. This file only:
-//   • adapts the wallet-adapter shape to the SDK's SignerInput,
+//   • adapts the wallet-adapter shape to the SDK's chain-neutral GitSigner,
 //   • points the SDK reader/gateway at this app's configured network,
 //   • keeps the UI-only bits (templates + validators) the setup page imports.
 //
 // The deploy fee, table layout, and root id are all defined SDK-side now —
-// see the git-sdk pages layer / core/seed for the source of truth.
+// see the git-sdk pages layer / core/seed for the source of truth. The pages
+// layer is chain-neutral: deploy works on Solana and EVM, with the fee charged
+// in the active chain's native currency by the SDK. Reads route to the active
+// network the providers selected via setNetwork().
 
-import { setRpcUrl } from "iqlabs-sdk";
-import { setGatewayUrls } from "@iqlabs-official/git-sdk/browser";
 import {
   deployPages,
   isPagesDeployed,
@@ -22,15 +23,8 @@ import {
   type PagesConfig,
   type PagesDeployment,
   type PagesProfile,
+  type GitSigner,
 } from "@iqlabs-official/git-sdk/browser";
-import {
-  PublicKey,
-  Transaction,
-  type Connection,
-  type VersionedTransaction,
-} from "@solana/web3.js";
-import type { SignerInput } from "iqlabs-sdk/utils";
-import { NETWORK } from "@/lib/network";
 
 // Re-export the SDK config/profile shapes under the names the components used
 // before the consolidation, so imports don't churn.
@@ -78,34 +72,13 @@ export function validateIqprofileConfig(obj: unknown): asserts obj is IqprofileC
   if (typeof description !== "string") throw new Error("iqprofile.json: description required");
 }
 
-interface WalletAdapter {
-  publicKey: PublicKey | null;
-  signTransaction<T extends Transaction | VersionedTransaction>(tx: T): Promise<T>;
-  signAllTransactions<T extends Transaction | VersionedTransaction>(txs: T[]): Promise<T[]>;
-}
-
 export class IqpagesService {
-  readonly connection: Connection;
-  readonly wallet: WalletAdapter;
-
-  constructor(connection: Connection, wallet: WalletAdapter) {
-    this.connection = connection;
-    this.wallet = wallet;
-    // The SDK reader resolves a process-global RPC and infers its gateway from
-    // it. Pin both to this app's network so reads hit the same endpoints the
-    // rest of the UI uses (mirrors what GitClient does in its constructor).
-    setRpcUrl(connection.rpcEndpoint);
-    setGatewayUrls(NETWORK.gateways);
-  }
-
-  private get signer(): SignerInput {
-    if (!this.wallet.publicKey) throw new Error("Wallet not connected");
-    return {
-      publicKey: this.wallet.publicKey,
-      signTransaction: this.wallet.signTransaction.bind(this.wallet),
-      signAllTransactions: this.wallet.signAllTransactions.bind(this.wallet),
-    };
-  }
+  // A pre-resolved chain-neutral signer for the active chain (Solana wallet
+  // adapter shape OR an ethers Signer), or null for read-only use. The hook
+  // that constructs this picks the right one for the active network. Reads
+  // need no signer; only deploy() does. Network routing (setNetwork / gateway /
+  // setRpcUrl) is owned by NetworkProvider, so the service doesn't touch it.
+  constructor(private readonly activeSigner: GitSigner | null) {}
 
   listAll(): Promise<DeploymentRow[]> {
     return listPagesDeployments();
@@ -124,9 +97,11 @@ export class IqpagesService {
   }
 
   /** Register the repo in the gallery. One-shot — second call throws. Returns
-   *  the marker-row signature. */
+   *  the marker-row signature. Chain-neutral: deployPages charges the fee in the
+   *  active chain's native currency. */
   async deploy(repo: string): Promise<string> {
-    const { sig } = await deployPages(this.connection, this.signer, repo);
+    if (!this.activeSigner) throw new Error("Wallet not connected");
+    const { sig } = await deployPages(this.activeSigner, repo);
     return sig;
   }
 }

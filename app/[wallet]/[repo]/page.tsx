@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import {
-  useGitClient,
+  useActiveGitClient,
   useCommits,
   useOwnerRepos,
   useInvalidateRepo,
@@ -20,7 +20,7 @@ export default function RepoDetail() {
     Array.isArray(params.repo) ? params.repo[0] : (params.repo as string),
   );
 
-  const client = useGitClient();
+  const client = useActiveGitClient();
   const reposQuery = useOwnerRepos(ownerAddress);
   const repo = reposQuery.data?.find((r) => r.name === repoName) ?? null;
   const commitsQuery = useCommits(ownerAddress, repoName);

@@ -3,9 +3,9 @@
 // Home — public registry gallery + repo creation. Cyberpunk shell preserved
 // from v1; data layer now goes through `@iqlabs-official/git-sdk/browser`.
 
-import { useGitClient, useInvalidateRepo, useRegistry } from "@/hooks/useGitData";
+import { useActiveGitClient, useInvalidateRepo, useRegistry } from "@/hooks/useGitData";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { NetworkSelector } from "@/app/components/NetworkSelector";
 import { Box, Folder, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -24,7 +24,7 @@ const Spinner = () => (
 export default function Home() {
   const wallet = useWallet();
   const myAddr = wallet.publicKey?.toBase58();
-  const client = useGitClient();
+  const client = useActiveGitClient();
   const invalidate = useInvalidateRepo();
   const { data: entries, isFetching, refetch } = useRegistry({ limit: PAGE_FETCH });
 
@@ -97,7 +97,7 @@ export default function Home() {
                 My // Repos
               </Link>
             )}
-            <WalletMultiButton className="!bg-neon-cyan/10 !border !border-neon-cyan !text-neon-cyan !rounded-none !font-tech !uppercase !tracking-wider hover:!bg-neon-cyan/20 hover:!shadow-[0_0_15px_cyan]" />
+            <NetworkSelector />
           </div>
         </div>
       </nav>
