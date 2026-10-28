@@ -24,17 +24,18 @@ interface NetworkConfig {
 }
 
 // origin-restricted public Helius key (browser-safe; same key both clusters).
-const HELIUS_KEY = "fbb113ce-eeb4-4277-8c44-7153632d175a";
+// Keyless, CORS-open public RPCs: the browser calls these directly, so no
+// API key may live here (a key in a client bundle is public).
 
 const CONFIGS: Record<Cluster, NetworkConfig> = {
   mainnet: {
-    rpcEndpoint: `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`,
+    rpcEndpoint: "https://solana-rpc.publicnode.com",
     gateways: ["https://gateway.solanainternet.com", "https://gateway.iqlabs.dev"],
     gatewaySiteBase: "https://gateway.solanainternet.com/site",
     solscanQuery: "",
   },
   devnet: {
-    rpcEndpoint: `https://devnet.helius-rpc.com/?api-key=${HELIUS_KEY}`,
+    rpcEndpoint: "https://api.devnet.solana.com",
     gateways: ["https://dev-gateway.iqlabs.dev"],
     gatewaySiteBase: "https://dev-gateway.iqlabs.dev/site",
     solscanQuery: "?cluster=devnet",
