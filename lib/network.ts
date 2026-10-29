@@ -51,7 +51,9 @@ export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
     family: "solana",
     token: "mainnet",
     label: "Solana Mainnet",
-    rpcEndpoint: "https://solana-rpc.publicnode.com",
+    rpcEndpoint:
+      process.env.NEXT_PUBLIC_SOLANA_MAINNET_RPC_URL ||
+      "https://solana-rpc.publicnode.com",
     gateways: [MULTICHAIN_GATEWAY],
     gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
     solscanQuery: "",
@@ -60,7 +62,9 @@ export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
     family: "solana",
     token: "devnet",
     label: "Solana Devnet",
-    rpcEndpoint: "https://api.devnet.solana.com",
+    rpcEndpoint:
+      process.env.NEXT_PUBLIC_SOLANA_DEVNET_RPC_URL ||
+      "https://api.devnet.solana.com",
     gateways: ["https://dev-gateway.iqlabs.dev"],
     gatewaySiteBase: "https://dev-gateway.iqlabs.dev/site",
     solscanQuery: "?cluster=devnet",
