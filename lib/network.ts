@@ -42,7 +42,8 @@ export interface NetworkConfig {
   label: string;
 }
 
-const HELIUS_KEY = "fbb113ce-eeb4-4277-8c44-7153632d175a";
+// Keyless, CORS-open public RPCs: the browser calls these directly, so no
+// API key may live here (a key in a client bundle is public).
 const MULTICHAIN_GATEWAY = "https://gateway.iqlabs.dev";
 
 export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
@@ -52,7 +53,7 @@ export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
     label: "Solana Mainnet",
     rpcEndpoint:
       process.env.NEXT_PUBLIC_SOLANA_MAINNET_RPC_URL ||
-      `https://mainnet.helius-rpc.com/?api-key=${HELIUS_KEY}`,
+      "https://solana-rpc.publicnode.com",
     gateways: [MULTICHAIN_GATEWAY],
     gatewaySiteBase: `${MULTICHAIN_GATEWAY}/site`,
     solscanQuery: "",
@@ -63,7 +64,7 @@ export const NETWORK_CONFIGS: Record<string, NetworkConfig> = {
     label: "Solana Devnet",
     rpcEndpoint:
       process.env.NEXT_PUBLIC_SOLANA_DEVNET_RPC_URL ||
-      `https://devnet.helius-rpc.com/?api-key=${HELIUS_KEY}`,
+      "https://api.devnet.solana.com",
     gateways: ["https://dev-gateway.iqlabs.dev"],
     gatewaySiteBase: "https://dev-gateway.iqlabs.dev/site",
     solscanQuery: "?cluster=devnet",
