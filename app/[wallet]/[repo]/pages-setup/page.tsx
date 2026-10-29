@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNetwork } from "@/app/components/NetworkProvider";
 import { useParams } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { NetworkSelector } from "@/app/components/NetworkSelector";
@@ -29,6 +31,14 @@ function encodeBase64Text(text: string): string {
 
 export default function PagesSetup() {
   const params = useParams<{ wallet: string; repo: string }>();
+  const { networkKey } = useNetwork();
+  return <PagesSetupForm key={`${networkKey}:${params?.wallet}:${params?.repo}`} />;
+}
+
+function PagesSetupForm() {
+  const params = useParams<{ wallet: string; repo: string }>();
+  const { networkKey } = useNetwork();
+  const queryClient = useQueryClient();
   const walletAdapter = useWallet();
   const owner = params?.wallet;
   const repoName = params?.repo;
@@ -40,8 +50,11 @@ export default function PagesSetup() {
   const headTreeId = commits?.[0]?.treeTxId;
   const { data: tree } = useFileTree(headTreeId);
 
-  const { data: existingConfig } = useIqpagesConfig(owner, repoName);
-  const { data: existingProfile } = useIqpagesProfile(owner, repoName);
+  const configQuery = useIqpagesConfig(owner, repoName);
+  const profileQuery = useIqpagesProfile(owner, repoName);
+  const existingConfig = configQuery.data;
+  const existingProfile = profileQuery.data;
+  const loadFailed = configQuery.isError || profileQuery.isError;
 
   const [iqpagesJson, setIqpagesJson] = useState("");
   const [iqprofileJson, setIqprofileJson] = useState("");
@@ -63,7 +76,7 @@ export default function PagesSetup() {
   // — the user fills it (or pastes their own) before committing.
   useEffect(() => {
     if (initialized) return;
-    if (existingConfig === undefined) return; // still loading
+    if (existingConfig === undefined || existingProfile === undefined) return;
     if (existingConfig) {
       setIqpagesJson(JSON.stringify(existingConfig, null, 2));
       setIqpagesLocked(true);
@@ -144,10 +157,21 @@ export default function PagesSetup() {
       }
 
       const commit = await client.commit(repoName, "iqpages config update", scan);
-      invalidate(owner, repoName);
-      // Re-lock so the next click is "Deploy", not "another commit". The
-      // refetch from invalidate() will pull the new existingConfig and the
-      // textareas already mirror it.
+      await invalidate(owner, repoName);
+      // The completed commit is authoritative even if a gateway head is stale.
+      // Seed only the files actually written; do not erase a retained profile.
+      queryClient.setQueryData(
+        ["iqpages", networkKey, "config", owner, repoName], JSON.parse(iqpagesJson),
+      );
+      if (includeProfile) {
+        queryClient.setQueryData(
+          ["iqpages", networkKey, "profile", owner, repoName], JSON.parse(iqprofileJson),
+        );
+      }
+      queryClient.setQueryData(
+        ["git", "latestTree", networkKey, owner, repoName], commit.treeTxId,
+      );
+      // Re-lock the confirmed values so the next action can be Deploy.
       setIqpagesLocked(true);
       if (includeProfile) setIqprofileLocked(true);
       toast.success(`Committed ${commit.id.slice(0, 8)}…`);
@@ -231,116 +255,138 @@ export default function PagesSetup() {
           </div>
         )}
 
-        <section className="mb-8">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-cyber uppercase tracking-widest text-neon-cyan">
-              iqpages.json (required)
-            </h2>
-            {existingConfig && (
-              iqpagesLocked ? (
+        {!initialized && (
+          <div role="status" className="mb-6 font-mono text-sm text-white/70">
+            {loadFailed ? (
+              <>
+                Could not load Pages settings.{" "}
                 <button
-                  onClick={unlockIqpages}
-                  className="text-xs font-tech uppercase tracking-widest text-neon-pink border border-neon-pink/50 px-3 py-1 hover:bg-neon-pink/10"
+                  type="button"
+                  onClick={() => {
+                    void configQuery.refetch();
+                    void profileQuery.refetch();
+                  }}
+                  className="underline text-neon-cyan"
                 >
-                  Edit
+                  Retry
                 </button>
-              ) : (
-                <button
-                  onClick={cancelIqpagesEdit}
-                  className="text-xs font-tech uppercase tracking-widest text-white/60 border border-cyber-border px-3 py-1 hover:border-white/40"
-                >
-                  Cancel edit
-                </button>
-              )
-            )}
+              </>
+            ) : "Loading Pages settings…"}
           </div>
-          <textarea
-            value={iqpagesJson}
-            onChange={(e) => setIqpagesJson(e.target.value)}
-            readOnly={iqpagesLocked}
-            placeholder={`{\n  "name": "${repoName ?? "my-app"}",\n  "version": "1.0.0",\n  "description": "Short description",\n  "entry": "index.html"\n}`}
-            className={`w-full h-48 bg-black border p-3 font-mono text-sm placeholder-white/30 focus:outline-none ${iqpagesLocked ? "border-cyber-border text-white/60 cursor-not-allowed" : "border-cyber-border text-white focus:border-neon-cyan"}`}
-            spellCheck={false}
-          />
-          {iqpagesError && (
-            <div className="text-red-400 text-xs font-mono mt-2">{iqpagesError}</div>
-          )}
-        </section>
-
-        <section className="mb-8">
-          <label className="flex items-center gap-2 text-sm font-mono text-white/80 mb-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={includeProfile}
-              onChange={(e) => setIncludeProfile(e.target.checked)}
+        )}
+        <fieldset disabled={!initialized || committing}>
+          <section className="mb-8">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-cyber uppercase tracking-widest text-neon-cyan">
+                iqpages.json (required)
+              </h2>
+              {existingConfig && (
+                iqpagesLocked ? (
+                  <button
+                    onClick={unlockIqpages}
+                    className="text-xs font-tech uppercase tracking-widest text-neon-pink border border-neon-pink/50 px-3 py-1 hover:bg-neon-pink/10"
+                  >
+                    Edit
+                  </button>
+                ) : (
+                  <button
+                    onClick={cancelIqpagesEdit}
+                    className="text-xs font-tech uppercase tracking-widest text-white/60 border border-cyber-border px-3 py-1 hover:border-white/40"
+                  >
+                    Cancel edit
+                  </button>
+                )
+              )}
+            </div>
+            <textarea
+              value={iqpagesJson}
+              onChange={(e) => setIqpagesJson(e.target.value)}
+              readOnly={iqpagesLocked}
+              placeholder={`{\n  "name": "${repoName ?? "my-app"}",\n  "version": "1.0.0",\n  "description": "Short description",\n  "entry": "index.html"\n}`}
+              className={`w-full h-48 bg-black border p-3 font-mono text-sm placeholder-white/30 focus:outline-none ${iqpagesLocked ? "border-cyber-border text-white/60 cursor-not-allowed" : "border-cyber-border text-white focus:border-neon-cyan"}`}
+              spellCheck={false}
             />
-            Add iqprofile.json for Profile Net integration
-          </label>
-          {includeProfile && (
-            <>
-              {existingProfile && (
-                <div className="flex justify-end mb-2">
-                  {iqprofileLocked ? (
-                    <button
-                      onClick={unlockIqprofile}
-                      className="text-xs font-tech uppercase tracking-widest text-neon-pink border border-neon-pink/50 px-3 py-1 hover:bg-neon-pink/10"
-                    >
-                      Edit
-                    </button>
-                  ) : (
-                    <button
-                      onClick={cancelIqprofileEdit}
-                      className="text-xs font-tech uppercase tracking-widest text-white/60 border border-cyber-border px-3 py-1 hover:border-white/40"
-                    >
-                      Cancel edit
-                    </button>
-                  )}
-                </div>
-              )}
-              <textarea
-                value={iqprofileJson}
-                onChange={(e) => setIqprofileJson(e.target.value)}
-                readOnly={iqprofileLocked}
-                placeholder={`{\n  "displayName": "${repoName ?? "My App"}",\n  "description": "Short description",\n  "icon": "./icon.png",\n  "routes": {\n    "profile": "/?profile={walletAddress}"\n  }\n}`}
-                className={`w-full h-56 bg-black border p-3 font-mono text-sm placeholder-white/30 focus:outline-none ${iqprofileLocked ? "border-cyber-border text-white/60 cursor-not-allowed" : "border-cyber-border text-white focus:border-neon-cyan"}`}
-                spellCheck={false}
-              />
-              {iqprofileError && (
-                <div className="text-red-400 text-xs font-mono mt-2">{iqprofileError}</div>
-              )}
-            </>
-          )}
-        </section>
+            {iqpagesError && (
+              <div className="text-red-400 text-xs font-mono mt-2">{iqpagesError}</div>
+            )}
+          </section>
 
-        <div className="flex gap-3">
-          <button
-            onClick={handleCommit}
-            disabled={
-              !isOwner ||
-              committing ||
-              !!iqpagesError ||
-              (includeProfile && !!iqprofileError) ||
-              // Nothing was actually edited — commit would be a no-op.
-              (iqpagesLocked && (!includeProfile || iqprofileLocked))
-            }
-            className="py-3 px-6 cyber-button-primary disabled:opacity-40"
-          >
-            {committing ? "Working…" : "Commit to repo"}
-          </button>
-          <button
-            onClick={handleDeploy}
-            disabled={!isOwner || committing}
-            className="py-3 px-6 border border-neon-green text-neon-green font-tech uppercase tracking-widest hover:bg-neon-green/10 disabled:opacity-40"
-          >
-            Deploy
-          </button>
-          <Link
-            href={`/${owner}/${repoName}`}
-            className="py-3 px-6 border border-cyber-border text-white/70 font-tech uppercase tracking-widest hover:border-neon-cyan hover:text-neon-cyan"
-          >
-            Cancel
-          </Link>
-        </div>
+          <section className="mb-8">
+            <label className="flex items-center gap-2 text-sm font-mono text-white/80 mb-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeProfile}
+                onChange={(e) => setIncludeProfile(e.target.checked)}
+              />
+              Add iqprofile.json for Profile Net integration
+            </label>
+            {includeProfile && (
+              <>
+                {existingProfile && (
+                  <div className="flex justify-end mb-2">
+                    {iqprofileLocked ? (
+                      <button
+                        onClick={unlockIqprofile}
+                        className="text-xs font-tech uppercase tracking-widest text-neon-pink border border-neon-pink/50 px-3 py-1 hover:bg-neon-pink/10"
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      <button
+                        onClick={cancelIqprofileEdit}
+                        className="text-xs font-tech uppercase tracking-widest text-white/60 border border-cyber-border px-3 py-1 hover:border-white/40"
+                      >
+                        Cancel edit
+                      </button>
+                    )}
+                  </div>
+                )}
+                <textarea
+                  value={iqprofileJson}
+                  onChange={(e) => setIqprofileJson(e.target.value)}
+                  readOnly={iqprofileLocked}
+                  placeholder={`{\n  "displayName": "${repoName ?? "My App"}",\n  "description": "Short description",\n  "icon": "./icon.png",\n  "routes": {\n    "profile": "/?profile={walletAddress}"\n  }\n}`}
+                  className={`w-full h-56 bg-black border p-3 font-mono text-sm placeholder-white/30 focus:outline-none ${iqprofileLocked ? "border-cyber-border text-white/60 cursor-not-allowed" : "border-cyber-border text-white focus:border-neon-cyan"}`}
+                  spellCheck={false}
+                />
+                {iqprofileError && (
+                  <div className="text-red-400 text-xs font-mono mt-2">{iqprofileError}</div>
+                )}
+              </>
+            )}
+          </section>
+
+          <div className="flex gap-3">
+            <button
+              onClick={handleCommit}
+              disabled={
+                !isOwner ||
+                committing ||
+                !!iqpagesError ||
+                (includeProfile && !!iqprofileError) ||
+                // Nothing was actually edited — commit would be a no-op.
+                (iqpagesLocked && (!includeProfile || iqprofileLocked))
+              }
+              className="py-3 px-6 cyber-button-primary disabled:opacity-40"
+            >
+              {committing ? "Working…" : "Commit to repo"}
+            </button>
+            <button
+              onClick={handleDeploy}
+              disabled={!isOwner || committing}
+              className="py-3 px-6 border border-neon-green text-neon-green font-tech uppercase tracking-widest hover:bg-neon-green/10 disabled:opacity-40"
+            >
+              Deploy
+            </button>
+            <Link
+              href={`/${owner}/${repoName}`}
+              className="py-3 px-6 border border-cyber-border text-white/70 font-tech uppercase tracking-widest hover:border-neon-cyan hover:text-neon-cyan"
+            >
+              Cancel
+            </Link>
+          </div>
+
+        </fieldset>
 
         {deployedUrl && (
           <div className="mt-8 p-4 border border-neon-green bg-neon-green/5">

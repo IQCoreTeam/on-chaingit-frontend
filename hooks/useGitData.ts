@@ -207,12 +207,20 @@ export function useInvalidateRepo() {
   // Match by prefix after the networkKey segment — predicate keeps this robust
   // to the networkKey now sitting in every read queryKey.
   return (owner: string, repoName: string) => {
-    qc.invalidateQueries({
+    return qc.invalidateQueries({
       predicate: (q) => {
         const k = q.queryKey as unknown[];
         if (k[0] === "registry") return true;
         if (k[0] === "repos" && k[2] === owner) return true;
         if (k[0] === "commits" && k[2] === owner && k[3] === repoName) return true;
+        if (
+          k[0] === "iqpages" && (k[2] === "config" || k[2] === "profile") &&
+          k[3] === owner && k[4] === repoName
+        ) return true;
+        if (
+          k[0] === "git" && k[1] === "latestTree" &&
+          k[3] === owner && k[4] === repoName
+        ) return true;
         return false;
       },
     });
