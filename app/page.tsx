@@ -33,8 +33,14 @@ export default function Home() {
 
   const filteredEntries = useMemo(() => {
     if (!entries) return [];
-    if (filter === "mine") return myAddr ? entries.filter((e) => e.owner === myAddr) : [];
-    return entries;
+    const seen = new Set<string>();
+    return entries.filter((entry) => {
+      if (filter === "mine" && entry.owner !== myAddr) return false;
+      const key = `${entry.owner}/${entry.repo}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }, [entries, filter, myAddr]);
 
   const [newRepoName, setNewRepoName] = useState("");

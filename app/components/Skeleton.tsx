@@ -73,7 +73,7 @@ export function CodeViewerSkeleton() {
                     <div key={i} className="flex items-center gap-4">
                         <Skeleton width={30} height={16} variant="rounded" className="opacity-30" />
                         <Skeleton 
-                            width={`${Math.random() * 60 + 20}%`} 
+                            width={i % 3 === 0 ? "40%" : "70%"}
                             height={16} 
                             variant="rounded" 
                         />
@@ -93,7 +93,7 @@ export function FileTreeSkeleton() {
             {[...Array(8)].map((_, i) => (
                 <div key={i} className="flex items-center gap-2" style={{ paddingLeft: `${(i % 3) * 1.5}rem` }}>
                     <Skeleton width={16} height={16} variant="rounded" />
-                    <Skeleton width={`${Math.random() * 40 + 40}%`} height={16} variant="rounded" />
+                    <Skeleton width="60%" height={16} variant="rounded" />
                 </div>
             ))}
         </div>
